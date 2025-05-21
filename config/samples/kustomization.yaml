@@ -1,0 +1,7 @@
+## Append samples of your project ##
+resources:
+- netguard_v1alpha1_service.yaml
+- netguard_v1alpha1_addressgroupbinding.yaml
+- netguard_v1alpha1_addressgroupportmapping.yaml
+- netguard_v1alpha1_addressgroupbindingpolicy.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples
