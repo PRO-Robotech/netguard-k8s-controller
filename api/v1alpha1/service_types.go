@@ -25,29 +25,55 @@ import (
 
 // ServiceSpec defines the desired state of Service.
 type ServiceSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// +optional
+	Description string `json:"description,omitempty"`
 
-	// Foo is an example field of Service. Edit service_types.go to remove/update
-	Foo string `json:"foo,omitempty"`
+	// IngressPorts defines the ports that are allowed for ingress traffic
+	// +optional
+	IngressPorts []IngressPort `json:"ingressPorts,omitempty"`
+}
+
+// AddressGroupsSpec defines the address groups associated with a Service.
+type AddressGroupsSpec struct {
+	// Items contains the list of address groups
+	Items []NamespacedObjectReference `json:"items,omitempty"`
+}
+
+// IngressPort defines a port configuration for ingress traffic
+type IngressPort struct {
+	// Transport protocol for the rule
+	// +kubebuilder:validation:Enum=TCP;UDP
+	Protocol TransportProtocol `json:"protocol"`
+
+	// Port or port range (e.g., "80", "8080-9090")
+	Port string `json:"port"`
+
+	// Description of this port configuration
+	// +optional
+	Description string `json:"description,omitempty"`
 }
 
 // ServiceStatus defines the observed state of Service.
 type ServiceStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// Conditions represent the latest available observations of the resource's state
+	// +optional
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:subresource:addressGroups
 
 // Service is the Schema for the services API.
 type Service struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   ServiceSpec   `json:"spec,omitempty"`
-	Status ServiceStatus `json:"status,omitempty"`
+	Spec          ServiceSpec       `json:"spec,omitempty"`
+	Status        ServiceStatus     `json:"status,omitempty"`
+	AddressGroups AddressGroupsSpec `json:"addressGroups,omitempty"`
 }
 
 // +kubebuilder:object:root=true

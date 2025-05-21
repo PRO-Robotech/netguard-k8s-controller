@@ -25,17 +25,20 @@ import (
 
 // AddressGroupBindingPolicySpec defines the desired state of AddressGroupBindingPolicy.
 type AddressGroupBindingPolicySpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// AddressGroupRef is a reference to the AddressGroup resource
+	AddressGroupRef NamespacedObjectReference `json:"addressGroupRef"`
 
-	// Foo is an example field of AddressGroupBindingPolicy. Edit addressgroupbindingpolicy_types.go to remove/update
-	Foo string `json:"foo,omitempty"`
+	// ServiceRef is a reference to the Service resource
+	ServiceRef NamespacedObjectReference `json:"serviceRef"`
 }
 
 // AddressGroupBindingPolicyStatus defines the observed state of AddressGroupBindingPolicy.
 type AddressGroupBindingPolicyStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// Conditions represent the latest available observations of the resource's state
+	// +optional
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
 }
 
 // +kubebuilder:object:root=true

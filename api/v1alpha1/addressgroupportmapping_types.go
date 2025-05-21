@@ -23,31 +23,46 @@ import (
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
+// ServicePortsRef defines a reference to a Service and its allowed ports
+type ServicePortsRef struct {
+	// Reference to the service
+	NamespacedObjectReference `json:",inline"`
+
+	// Ports defines the allowed ports by protocol
+	Ports ProtocolPorts `json:"ports"`
+}
+
+// AccessPortsSpec defines the services and their ports that are allowed access
+type AccessPortsSpec struct {
+	// Items contains the list of service ports references
+	Items []ServicePortsRef `json:"items,omitempty"`
+}
+
 // AddressGroupPortMappingSpec defines the desired state of AddressGroupPortMapping.
 type AddressGroupPortMappingSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-
-	// Foo is an example field of AddressGroupPortMapping. Edit addressgroupportmapping_types.go to remove/update
-	Foo string `json:"foo,omitempty"`
 }
 
 // AddressGroupPortMappingStatus defines the observed state of AddressGroupPortMapping.
 type AddressGroupPortMappingStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// Conditions represent the latest available observations of the resource's state
+	// +optional
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:subresource:accessPorts
 
 // AddressGroupPortMapping is the Schema for the addressgroupportmappings API.
 type AddressGroupPortMapping struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   AddressGroupPortMappingSpec   `json:"spec,omitempty"`
-	Status AddressGroupPortMappingStatus `json:"status,omitempty"`
+	Spec        AddressGroupPortMappingSpec   `json:"spec,omitempty"`
+	Status      AddressGroupPortMappingStatus `json:"status,omitempty"`
+	AccessPorts AccessPortsSpec               `json:"accessPorts,omitempty"`
 }
 
 // +kubebuilder:object:root=true
