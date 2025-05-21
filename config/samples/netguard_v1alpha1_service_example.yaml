@@ -1,0 +1,46 @@
+apiVersion: netguard.sgroups.io/v1alpha1
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/name: sgroups-k8s-netguard
+    app.kubernetes.io/managed-by: kustomize
+  name: database-service-example
+  namespace: database
+spec:
+  description: "Database service with various database ports"
+  ingressPorts:
+    - protocol: TCP
+      port: "3306"
+      description: "MySQL standard port"
+    - protocol: TCP
+      port: "5432"
+      description: "PostgreSQL standard port"
+    - protocol: TCP
+      port: "1433"
+      description: "MS SQL Server port"
+    - protocol: TCP
+      port: "27017-27019"
+      description: "MongoDB port range"
+    - protocol: TCP
+      port: "6379"
+      description: "Redis port"
+    - protocol: UDP
+      port: "11211"
+      description: "Memcached UDP port"
+    - protocol: UDP
+      port: "60000-61000"
+      description: "High port range for database replication"
+addressGroups:
+  items:
+    - apiVersion: provider.sgroups.io/v1alpha1
+      kind: AddressGroup
+      name: database-servers
+      namespace: database
+    - apiVersion: provider.sgroups.io/v1alpha1
+      kind: AddressGroup
+      name: monitoring-servers
+      namespace: monitoring
+    - apiVersion: provider.sgroups.io/v1alpha1
+      kind: AddressGroup
+      name: backup-servers
+      namespace: backup

@@ -1,0 +1,18 @@
+apiVersion: netguard.sgroups.io/v1alpha1
+kind: AddressGroupBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: sgroups-k8s-netguard
+    app.kubernetes.io/managed-by: kustomize
+  name: api-to-database-binding
+  namespace: application
+spec:
+  serviceRef:
+    apiVersion: netguard.sgroups.io/v1alpha1
+    kind: Service
+    name: api-service
+  addressGroupRef:
+    apiVersion: provider.sgroups.io/v1alpha1
+    kind: AddressGroup
+    name: database-servers
+    namespace: database

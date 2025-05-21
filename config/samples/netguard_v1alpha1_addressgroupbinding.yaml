@@ -1,9 +1,0 @@
-apiVersion: netguard.sgroups.io/v1alpha1
-kind: AddressGroupBinding
-metadata:
-  labels:
-    app.kubernetes.io/name: sgroups-k8s-netguard
-    app.kubernetes.io/managed-by: kustomize
-  name: addressgroupbinding-sample
-spec:
-  # TODO(user): Add fields here
