@@ -1,0 +1,86 @@
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: validating-webhook-configuration
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-netguard-sgroups-io-v1alpha1-addressgroupbinding
+  failurePolicy: Fail
+  name: vaddressgroupbinding-v1alpha1.kb.io
+  rules:
+  - apiGroups:
+    - netguard.sgroups.io
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - addressgroupbindings
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-netguard-sgroups-io-v1alpha1-addressgroupbindingpolicy
+  failurePolicy: Fail
+  name: vaddressgroupbindingpolicy-v1alpha1.kb.io
+  rules:
+  - apiGroups:
+    - netguard.sgroups.io
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - addressgroupbindingpolicies
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-netguard-sgroups-io-v1alpha1-addressgroupportmapping
+  failurePolicy: Fail
+  name: vaddressgroupportmapping-v1alpha1.kb.io
+  rules:
+  - apiGroups:
+    - netguard.sgroups.io
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - addressgroupportmappings
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-netguard-sgroups-io-v1alpha1-service
+  failurePolicy: Fail
+  name: vservice-v1alpha1.kb.io
+  rules:
+  - apiGroups:
+    - netguard.sgroups.io
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - services
+  sideEffects: None
