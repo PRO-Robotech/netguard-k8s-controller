@@ -70,15 +70,22 @@ func (v *AddressGroupBindingPolicyCustomValidator) ValidateCreate(ctx context.Co
 
 	// 1.1 Check that an AddressGroup with the same name exists in the same namespace
 	addressGroupRef := policy.Spec.AddressGroupRef
+	addressGroupNamespace := ResolveNamespace(addressGroupRef.GetNamespace(), policy.GetNamespace())
+
+	// Validate that the policy is created in the same namespace as the address group
+	if addressGroupNamespace != policy.GetNamespace() {
+		return nil, fmt.Errorf("policy must be created in the same namespace as the referenced address group")
+	}
+
 	addressGroupPortMapping := &netguardv1alpha1.AddressGroupPortMapping{}
 	addressGroupPortMappingKey := client.ObjectKey{
 		Name:      addressGroupRef.GetName(),
-		Namespace: ResolveNamespace(addressGroupRef.GetNamespace(), policy.GetNamespace()),
+		Namespace: addressGroupNamespace,
 	}
 	if err := v.Client.Get(ctx, addressGroupPortMappingKey, addressGroupPortMapping); err != nil {
 		return nil, fmt.Errorf("addressGroup %s not found in namespace %s: %w",
 			addressGroupRef.GetName(),
-			ResolveNamespace(addressGroupRef.GetNamespace(), policy.GetNamespace()),
+			addressGroupNamespace,
 			err)
 	}
 
@@ -193,13 +200,23 @@ func (v *AddressGroupBindingPolicyCustomValidator) ValidateUpdate(ctx context.Co
 
 	// 1.2 Check that onRef (AddressGroupRef) exists
 	addressGroupRef := newPolicy.Spec.AddressGroupRef
+	addressGroupNamespace := ResolveNamespace(addressGroupRef.GetNamespace(), newPolicy.GetNamespace())
+
+	// Validate that the policy is in the same namespace as the address group
+	if addressGroupNamespace != newPolicy.GetNamespace() {
+		return nil, fmt.Errorf("policy must be in the same namespace as the referenced address group")
+	}
+
 	addressGroupPortMapping := &netguardv1alpha1.AddressGroupPortMapping{}
 	addressGroupPortMappingKey := client.ObjectKey{
 		Name:      addressGroupRef.GetName(),
-		Namespace: ResolveNamespace(addressGroupRef.GetNamespace(), newPolicy.GetNamespace()),
+		Namespace: addressGroupNamespace,
 	}
 	if err := v.Client.Get(ctx, addressGroupPortMappingKey, addressGroupPortMapping); err != nil {
-		return nil, fmt.Errorf("addressGroup %s not found: %w", addressGroupRef.GetName(), err)
+		return nil, fmt.Errorf("addressGroup %s not found in namespace %s: %w",
+			addressGroupRef.GetName(),
+			addressGroupNamespace,
+			err)
 	}
 
 	return nil, nil
@@ -213,18 +230,32 @@ func (v *AddressGroupBindingPolicyCustomValidator) ValidateDelete(ctx context.Co
 	}
 	addressgroupbindingpolicylog.Info("Validation for AddressGroupBindingPolicy upon deletion", "name", policy.GetName())
 
+	// Get the address group namespace (policy is in the same namespace as the address group)
+	addressGroupNamespace := policy.GetNamespace()
+
+	// Get the service namespace from the policy
+	serviceNamespace := ResolveNamespace(policy.Spec.ServiceRef.GetNamespace(), addressGroupNamespace)
+
 	// 1.1 Check that there are no active addressGroupBindings related to this policy
+	// Only list bindings in the service namespace since AddressGroupBinding is always created in the same namespace as the Service
 	bindingList := &netguardv1alpha1.AddressGroupBindingList{}
-	if err := v.Client.List(ctx, bindingList, client.InNamespace(policy.GetNamespace())); err != nil {
-		return nil, fmt.Errorf("failed to list AddressGroupBindings: %w", err)
+	if err := v.Client.List(ctx, bindingList, client.InNamespace(serviceNamespace)); err != nil {
+		return nil, fmt.Errorf("failed to list AddressGroupBindings in namespace %s: %w", serviceNamespace, err)
 	}
 
 	// Check if any binding references the same service and address group as the policy
 	for _, binding := range bindingList.Items {
-		if binding.Spec.ServiceRef.GetName() == policy.Spec.ServiceRef.GetName() &&
+		// For cross-namespace bindings:
+		// 1. The binding is in the service namespace
+		// 2. The binding references the address group in the policy's namespace
+		// 3. The binding references the service in the policy's spec
+		if binding.GetNamespace() == serviceNamespace &&
+			binding.Spec.ServiceRef.GetName() == policy.Spec.ServiceRef.GetName() &&
 			binding.Spec.AddressGroupRef.GetName() == policy.Spec.AddressGroupRef.GetName() &&
-			binding.Spec.AddressGroupRef.GetNamespace() == policy.Spec.AddressGroupRef.GetNamespace() {
-			return nil, fmt.Errorf("cannot delete policy while active AddressGroupBinding %s exists", binding.GetName())
+			ResolveNamespace(binding.Spec.AddressGroupRef.GetNamespace(), binding.GetNamespace()) == addressGroupNamespace {
+
+			return nil, fmt.Errorf("cannot delete policy while active AddressGroupBinding %s exists in namespace %s",
+				binding.GetName(), binding.GetNamespace())
 		}
 	}
 
