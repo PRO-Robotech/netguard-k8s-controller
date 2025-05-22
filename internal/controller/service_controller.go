@@ -18,13 +18,21 @@ package controller
 
 import (
 	"context"
+	"reflect"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	netguardv1alpha1 "sgroups.io/netguard/api/v1alpha1"
+	"sgroups.io/netguard/internal/webhook/v1alpha1"
 )
 
 // ServiceReconciler reconciles a Service object
@@ -36,28 +44,267 @@ type ServiceReconciler struct {
 // +kubebuilder:rbac:groups=netguard.sgroups.io,resources=services,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=netguard.sgroups.io,resources=services/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=netguard.sgroups.io,resources=services/finalizers,verbs=update
+// +kubebuilder:rbac:groups=netguard.sgroups.io,resources=addressgroupbindings,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=netguard.sgroups.io,resources=addressgroupportmappings,verbs=get;list;watch;update;patch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the Service object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
-//
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.20.0/pkg/reconcile
 func (r *ServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = log.FromContext(ctx)
+	logger := log.FromContext(ctx)
+	logger.Info("Reconciling Service", "request", req)
 
-	// TODO(user): your logic here
+	// Get the Service resource
+	service := &netguardv1alpha1.Service{}
+	if err := r.Get(ctx, req.NamespacedName, service); err != nil {
+		if apierrors.IsNotFound(err) {
+			// Object not found, likely deleted
+			logger.Info("Service not found, it may have been deleted")
+			return ctrl.Result{}, nil
+		}
+		logger.Error(err, "Failed to get Service")
+		return ctrl.Result{}, err
+	}
 
+	// Add finalizer if it doesn't exist
+	const finalizer = "service.netguard.sgroups.io/finalizer"
+	if !controllerutil.ContainsFinalizer(service, finalizer) {
+		controllerutil.AddFinalizer(service, finalizer)
+		if err := r.Update(ctx, service); err != nil {
+			logger.Error(err, "Failed to add finalizer to Service")
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil // Requeue to continue reconciliation
+	}
+
+	// Check if the resource is being deleted
+	if !service.DeletionTimestamp.IsZero() {
+		return r.reconcileDelete(ctx, service, finalizer)
+	}
+
+	// Normal reconciliation
+	return r.reconcileNormal(ctx, service)
+}
+
+// reconcileNormal handles the normal reconciliation of a Service
+func (r *ServiceReconciler) reconcileNormal(ctx context.Context, service *netguardv1alpha1.Service) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
+	// Update status to Ready
+	setServiceCondition(service, netguardv1alpha1.ConditionReady, metav1.ConditionTrue, "ServiceCreated",
+		"Service successfully created")
+	if err := r.Status().Update(ctx, service); err != nil {
+		logger.Error(err, "Failed to update Service status")
+		return ctrl.Result{}, err
+	}
+
+	// If the service has ports and is bound to AddressGroups, update the port mappings
+	if len(service.Spec.IngressPorts) > 0 && len(service.AddressGroups.Items) > 0 {
+		// For each AddressGroup, update the port mapping
+		for _, addressGroupRef := range service.AddressGroups.Items {
+			// Get the AddressGroupPortMapping
+			portMapping := &netguardv1alpha1.AddressGroupPortMapping{}
+			portMappingKey := client.ObjectKey{
+				Name:      addressGroupRef.GetName(),
+				Namespace: v1alpha1.ResolveNamespace(addressGroupRef.GetNamespace(), service.GetNamespace()),
+			}
+			if err := r.Get(ctx, portMappingKey, portMapping); err != nil {
+				if apierrors.IsNotFound(err) {
+					// PortMapping not found, log and continue
+					logger.Info("AddressGroupPortMapping not found",
+						"addressGroup", addressGroupRef.GetName())
+					continue
+				}
+				logger.Error(err, "Failed to get AddressGroupPortMapping")
+				return ctrl.Result{}, err
+			}
+
+			// Create ServicePortsRef
+			servicePortsRef := netguardv1alpha1.ServicePortsRef{
+				NamespacedObjectReference: netguardv1alpha1.NamespacedObjectReference{
+					ObjectReference: netguardv1alpha1.ObjectReference{
+						APIVersion: "netguard.sgroups.io/v1alpha1",
+						Kind:       "Service",
+						Name:       service.GetName(),
+					},
+					Namespace: service.GetNamespace(),
+				},
+				Ports: v1alpha1.ConvertIngressPortsToProtocolPorts(service.Spec.IngressPorts),
+			}
+
+			// Check if the service is already in the port mapping
+			serviceFound := false
+			for i, sp := range portMapping.AccessPorts.Items {
+				if sp.GetName() == service.GetName() &&
+					sp.GetNamespace() == service.GetNamespace() {
+					// Update ports if they've changed
+					if !reflect.DeepEqual(sp.Ports, servicePortsRef.Ports) {
+						portMapping.AccessPorts.Items[i].Ports = servicePortsRef.Ports
+						if err := r.Update(ctx, portMapping); err != nil {
+							logger.Error(err, "Failed to update AddressGroupPortMapping.AccessPorts")
+							return ctrl.Result{}, err
+						}
+						logger.Info("Updated Service ports in AddressGroupPortMapping",
+							"service", service.GetName(),
+							"addressGroup", addressGroupRef.GetName())
+					}
+					serviceFound = true
+					break
+				}
+			}
+
+			// If the service is not in the port mapping, add it
+			if !serviceFound {
+				portMapping.AccessPorts.Items = append(portMapping.AccessPorts.Items, servicePortsRef)
+				if err := r.Update(ctx, portMapping); err != nil {
+					logger.Error(err, "Failed to add Service to AddressGroupPortMapping.AccessPorts")
+					return ctrl.Result{}, err
+				}
+				logger.Info("Added Service to AddressGroupPortMapping.AccessPorts",
+					"service", service.GetName(),
+					"addressGroup", addressGroupRef.GetName())
+			}
+		}
+	}
+
+	logger.Info("Service reconciled successfully")
 	return ctrl.Result{}, nil
+}
+
+// reconcileDelete handles the deletion of a Service
+func (r *ServiceReconciler) reconcileDelete(ctx context.Context, service *netguardv1alpha1.Service, finalizer string) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	logger.Info("Deleting Service", "name", service.GetName())
+
+	// 1. Get all AddressGroupBindings that reference this Service
+	bindingList := &netguardv1alpha1.AddressGroupBindingList{}
+	if err := r.List(ctx, bindingList, client.InNamespace(service.GetNamespace())); err != nil {
+		logger.Error(err, "Failed to list AddressGroupBindings")
+		return ctrl.Result{}, err
+	}
+
+	// 2. Delete all AddressGroupBindings that reference this Service
+	for _, binding := range bindingList.Items {
+		if binding.Spec.ServiceRef.GetName() == service.GetName() {
+			if err := r.Delete(ctx, &binding); err != nil {
+				logger.Error(err, "Failed to delete AddressGroupBinding",
+					"binding", binding.GetName())
+				return ctrl.Result{}, err
+			}
+			logger.Info("Deleted AddressGroupBinding for Service",
+				"binding", binding.GetName(),
+				"service", service.GetName())
+		}
+	}
+
+	// 3. For each AddressGroup in Service.AddressGroups, remove the Service from the port mapping
+	for _, addressGroupRef := range service.AddressGroups.Items {
+		// Get the AddressGroupPortMapping
+		portMapping := &netguardv1alpha1.AddressGroupPortMapping{}
+		portMappingKey := client.ObjectKey{
+			Name:      addressGroupRef.GetName(),
+			Namespace: v1alpha1.ResolveNamespace(addressGroupRef.GetNamespace(), service.GetNamespace()),
+		}
+
+		if err := r.Get(ctx, portMappingKey, portMapping); err != nil {
+			if !apierrors.IsNotFound(err) {
+				logger.Error(err, "Failed to get AddressGroupPortMapping")
+				return ctrl.Result{}, err
+			}
+			continue // If not found, continue to the next
+		}
+
+		// Remove the Service from the port mapping
+		for i, sp := range portMapping.AccessPorts.Items {
+			if sp.GetName() == service.GetName() &&
+				sp.GetNamespace() == service.GetNamespace() {
+				// Remove the item from the slice
+				portMapping.AccessPorts.Items = append(
+					portMapping.AccessPorts.Items[:i],
+					portMapping.AccessPorts.Items[i+1:]...)
+
+				if err := r.Update(ctx, portMapping); err != nil {
+					logger.Error(err, "Failed to remove Service from AddressGroupPortMapping.AccessPorts")
+					return ctrl.Result{}, err
+				}
+				logger.Info("Removed Service from AddressGroupPortMapping.AccessPorts",
+					"service", service.GetName(),
+					"addressGroup", addressGroupRef.GetName())
+				break
+			}
+		}
+	}
+
+	// 4. Remove finalizer
+	controllerutil.RemoveFinalizer(service, finalizer)
+	if err := r.Update(ctx, service); err != nil {
+		logger.Error(err, "Failed to remove finalizer from Service")
+		return ctrl.Result{}, err
+	}
+
+	logger.Info("Service deleted successfully")
+	return ctrl.Result{}, nil
+}
+
+// setServiceCondition updates a condition in the status
+func setServiceCondition(service *netguardv1alpha1.Service, conditionType string, status metav1.ConditionStatus, reason, message string) {
+	now := metav1.Now()
+	condition := metav1.Condition{
+		Type:               conditionType,
+		Status:             status,
+		Reason:             reason,
+		Message:            message,
+		LastTransitionTime: now,
+	}
+
+	// Find and update existing condition or append new one
+	for i, cond := range service.Status.Conditions {
+		if cond.Type == conditionType {
+			// Only update if status changed to avoid unnecessary updates
+			if cond.Status != status {
+				service.Status.Conditions[i] = condition
+			}
+			return
+		}
+	}
+
+	// Condition not found, append it
+	service.Status.Conditions = append(service.Status.Conditions, condition)
+}
+
+// findServicesForPortMapping finds services that are referenced in an AddressGroupPortMapping
+func (r *ServiceReconciler) findServicesForPortMapping(ctx context.Context, obj client.Object) []reconcile.Request {
+	portMapping, ok := obj.(*netguardv1alpha1.AddressGroupPortMapping)
+	if !ok {
+		return nil
+	}
+
+	var requests []reconcile.Request
+
+	// For each service in AccessPorts, create a reconcile request
+	for _, serviceRef := range portMapping.AccessPorts.Items {
+		requests = append(requests, reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Name:      serviceRef.GetName(),
+				Namespace: serviceRef.GetNamespace(),
+			},
+		})
+	}
+
+	return requests
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *ServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&netguardv1alpha1.Service{}).
+		Owns(&netguardv1alpha1.AddressGroupBinding{}).
+		// Watch for changes to AddressGroupPortMapping
+		Watches(
+			&netguardv1alpha1.AddressGroupPortMapping{},
+			handler.EnqueueRequestsFromMapFunc(r.findServicesForPortMapping),
+		).
 		Named("service").
 		Complete(r)
 }

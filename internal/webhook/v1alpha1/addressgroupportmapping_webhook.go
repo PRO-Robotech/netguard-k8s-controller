@@ -19,9 +19,11 @@ package v1alpha1
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
@@ -36,7 +38,9 @@ var addressgroupportmappinglog = logf.Log.WithName("addressgroupportmapping-reso
 // SetupAddressGroupPortMappingWebhookWithManager registers the webhook for AddressGroupPortMapping in the manager.
 func SetupAddressGroupPortMappingWebhookWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewWebhookManagedBy(mgr).For(&netguardv1alpha1.AddressGroupPortMapping{}).
-		WithValidator(&AddressGroupPortMappingCustomValidator{}).
+		WithValidator(&AddressGroupPortMappingCustomValidator{
+			Client: mgr.GetClient(),
+		}).
 		Complete()
 }
 
@@ -53,33 +57,54 @@ func SetupAddressGroupPortMappingWebhookWithManager(mgr ctrl.Manager) error {
 // NOTE: The +kubebuilder:object:generate=false marker prevents controller-gen from generating DeepCopy methods,
 // as this struct is used only for temporary operations and does not need to be deeply copied.
 type AddressGroupPortMappingCustomValidator struct {
-	// TODO(user): Add more fields as needed for validation
+	Client client.Client
 }
 
 var _ webhook.CustomValidator = &AddressGroupPortMappingCustomValidator{}
 
 // ValidateCreate implements webhook.CustomValidator so a webhook will be registered for the type AddressGroupPortMapping.
 func (v *AddressGroupPortMappingCustomValidator) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	addressgroupportmapping, ok := obj.(*netguardv1alpha1.AddressGroupPortMapping)
+	portMapping, ok := obj.(*netguardv1alpha1.AddressGroupPortMapping)
 	if !ok {
 		return nil, fmt.Errorf("expected a AddressGroupPortMapping object but got %T", obj)
 	}
-	addressgroupportmappinglog.Info("Validation for AddressGroupPortMapping upon creation", "name", addressgroupportmapping.GetName())
+	addressgroupportmappinglog.Info("Validation for AddressGroupPortMapping upon creation", "name", portMapping.GetName())
 
-	// TODO(user): fill in your validation logic upon object creation.
+	// Check for internal port overlaps (between services in this mapping)
+	if err := v.checkInternalPortOverlaps(portMapping); err != nil {
+		return nil, err
+	}
 
 	return nil, nil
 }
 
 // ValidateUpdate implements webhook.CustomValidator so a webhook will be registered for the type AddressGroupPortMapping.
 func (v *AddressGroupPortMappingCustomValidator) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.Object) (admission.Warnings, error) {
-	addressgroupportmapping, ok := newObj.(*netguardv1alpha1.AddressGroupPortMapping)
+	oldPortMapping, ok := oldObj.(*netguardv1alpha1.AddressGroupPortMapping)
 	if !ok {
-		return nil, fmt.Errorf("expected a AddressGroupPortMapping object for the newObj but got %T", newObj)
+		return nil, fmt.Errorf("expected a AddressGroupPortMapping object for oldObj but got %T", oldObj)
 	}
-	addressgroupportmappinglog.Info("Validation for AddressGroupPortMapping upon update", "name", addressgroupportmapping.GetName())
 
-	// TODO(user): fill in your validation logic upon object update.
+	newPortMapping, ok := newObj.(*netguardv1alpha1.AddressGroupPortMapping)
+	if !ok {
+		return nil, fmt.Errorf("expected a AddressGroupPortMapping object for newObj but got %T", newObj)
+	}
+	addressgroupportmappinglog.Info("Validation for AddressGroupPortMapping upon update", "name", newPortMapping.GetName())
+
+	// Skip validation for resources being deleted
+	if !newPortMapping.DeletionTimestamp.IsZero() {
+		return nil, nil
+	}
+
+	// Check that spec hasn't changed (should remain empty)
+	if !reflect.DeepEqual(oldPortMapping.Spec, newPortMapping.Spec) {
+		return nil, fmt.Errorf("spec of AddressGroupPortMapping cannot be changed")
+	}
+
+	// Check for internal port overlaps
+	if err := v.checkInternalPortOverlaps(newPortMapping); err != nil {
+		return nil, err
+	}
 
 	return nil, nil
 }
@@ -92,7 +117,72 @@ func (v *AddressGroupPortMappingCustomValidator) ValidateDelete(ctx context.Cont
 	}
 	addressgroupportmappinglog.Info("Validation for AddressGroupPortMapping upon deletion", "name", addressgroupportmapping.GetName())
 
-	// TODO(user): fill in your validation logic upon object deletion.
-
+	// No validation needed for deletion
 	return nil, nil
+}
+
+// checkInternalPortOverlaps checks for port overlaps between services in the port mapping
+func (v *AddressGroupPortMappingCustomValidator) checkInternalPortOverlaps(portMapping *netguardv1alpha1.AddressGroupPortMapping) error {
+	// Create maps to store port ranges by protocol
+	tcpRanges := make(map[string][]PortRange)
+	udpRanges := make(map[string][]PortRange)
+
+	// Check each service in the port mapping
+	for _, servicePortRef := range portMapping.AccessPorts.Items {
+		serviceName := servicePortRef.GetName()
+
+		// Check TCP ports
+		for _, tcpPort := range servicePortRef.Ports.TCP {
+			portRange, err := ParsePortRange(tcpPort.Port)
+			if err != nil {
+				return fmt.Errorf("invalid TCP port %s for service %s: %w",
+					tcpPort.Port, serviceName, err)
+			}
+
+			// Check for overlaps with other services' TCP ports
+			for otherService, ranges := range tcpRanges {
+				if otherService == serviceName {
+					continue // Skip checking against the same service
+				}
+
+				for _, existingRange := range ranges {
+					if DoPortRangesOverlap(portRange, existingRange) {
+						return fmt.Errorf("TCP port range %s for service %s overlaps with existing port range %d-%d for service %s",
+							tcpPort.Port, serviceName, existingRange.Start, existingRange.End, otherService)
+					}
+				}
+			}
+
+			// Add this port range to the map
+			tcpRanges[serviceName] = append(tcpRanges[serviceName], portRange)
+		}
+
+		// Check UDP ports
+		for _, udpPort := range servicePortRef.Ports.UDP {
+			portRange, err := ParsePortRange(udpPort.Port)
+			if err != nil {
+				return fmt.Errorf("invalid UDP port %s for service %s: %w",
+					udpPort.Port, serviceName, err)
+			}
+
+			// Check for overlaps with other services' UDP ports
+			for otherService, ranges := range udpRanges {
+				if otherService == serviceName {
+					continue // Skip checking against the same service
+				}
+
+				for _, existingRange := range ranges {
+					if DoPortRangesOverlap(portRange, existingRange) {
+						return fmt.Errorf("UDP port range %s for service %s overlaps with existing port range %d-%d for service %s",
+							udpPort.Port, serviceName, existingRange.Start, existingRange.End, otherService)
+					}
+				}
+			}
+
+			// Add this port range to the map
+			udpRanges[serviceName] = append(udpRanges[serviceName], portRange)
+		}
+	}
+
+	return nil
 }

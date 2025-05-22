@@ -22,6 +22,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
@@ -36,16 +37,17 @@ var addressgroupbindingpolicylog = logf.Log.WithName("addressgroupbindingpolicy-
 // SetupAddressGroupBindingPolicyWebhookWithManager registers the webhook for AddressGroupBindingPolicy in the manager.
 func SetupAddressGroupBindingPolicyWebhookWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewWebhookManagedBy(mgr).For(&netguardv1alpha1.AddressGroupBindingPolicy{}).
-		WithValidator(&AddressGroupBindingPolicyCustomValidator{}).
+		WithValidator(&AddressGroupBindingPolicyCustomValidator{
+			Client: mgr.GetClient(),
+		}).
 		Complete()
 }
 
 // TODO(user): EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 
-// TODO(user): change verbs to "verbs=create;update;delete" if you want to enable deletion validation.
 // NOTE: The 'path' attribute must follow a specific pattern and should not be modified directly here.
 // Modifying the path for an invalid path can cause API server errors; failing to locate the webhook.
-// +kubebuilder:webhook:path=/validate-netguard-sgroups-io-v1alpha1-addressgroupbindingpolicy,mutating=false,failurePolicy=fail,sideEffects=None,groups=netguard.sgroups.io,resources=addressgroupbindingpolicies,verbs=create;update,versions=v1alpha1,name=vaddressgroupbindingpolicy-v1alpha1.kb.io,admissionReviewVersions=v1
+// +kubebuilder:webhook:path=/validate-netguard-sgroups-io-v1alpha1-addressgroupbindingpolicy,mutating=false,failurePolicy=fail,sideEffects=None,groups=netguard.sgroups.io,resources=addressgroupbindingpolicies,verbs=create;update;delete,versions=v1alpha1,name=vaddressgroupbindingpolicy-v1alpha1.kb.io,admissionReviewVersions=v1
 
 // AddressGroupBindingPolicyCustomValidator struct is responsible for validating the AddressGroupBindingPolicy resource
 // when it is created, updated, or deleted.
@@ -53,46 +55,178 @@ func SetupAddressGroupBindingPolicyWebhookWithManager(mgr ctrl.Manager) error {
 // NOTE: The +kubebuilder:object:generate=false marker prevents controller-gen from generating DeepCopy methods,
 // as this struct is used only for temporary operations and does not need to be deeply copied.
 type AddressGroupBindingPolicyCustomValidator struct {
-	// TODO(user): Add more fields as needed for validation
+	Client client.Client
 }
 
 var _ webhook.CustomValidator = &AddressGroupBindingPolicyCustomValidator{}
 
 // ValidateCreate implements webhook.CustomValidator so a webhook will be registered for the type AddressGroupBindingPolicy.
 func (v *AddressGroupBindingPolicyCustomValidator) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	addressgroupbindingpolicy, ok := obj.(*netguardv1alpha1.AddressGroupBindingPolicy)
+	policy, ok := obj.(*netguardv1alpha1.AddressGroupBindingPolicy)
 	if !ok {
 		return nil, fmt.Errorf("expected a AddressGroupBindingPolicy object but got %T", obj)
 	}
-	addressgroupbindingpolicylog.Info("Validation for AddressGroupBindingPolicy upon creation", "name", addressgroupbindingpolicy.GetName())
+	addressgroupbindingpolicylog.Info("Validation for AddressGroupBindingPolicy upon creation", "name", policy.GetName())
 
-	// TODO(user): fill in your validation logic upon object creation.
+	// 1.1 Check that an AddressGroup with the same name exists in the same namespace
+	addressGroupRef := policy.Spec.AddressGroupRef
+	addressGroupPortMapping := &netguardv1alpha1.AddressGroupPortMapping{}
+	addressGroupPortMappingKey := client.ObjectKey{
+		Name:      addressGroupRef.GetName(),
+		Namespace: ResolveNamespace(addressGroupRef.GetNamespace(), policy.GetNamespace()),
+	}
+	if err := v.Client.Get(ctx, addressGroupPortMappingKey, addressGroupPortMapping); err != nil {
+		return nil, fmt.Errorf("addressGroup %s not found in namespace %s: %w",
+			addressGroupRef.GetName(),
+			ResolveNamespace(addressGroupRef.GetNamespace(), policy.GetNamespace()),
+			err)
+	}
+
+	// 1.2 Check that onRef (ServiceRef) exists
+	serviceRef := policy.Spec.ServiceRef
+	if serviceRef.GetName() == "" {
+		return nil, fmt.Errorf("serviceRef.name cannot be empty")
+	}
+	if serviceRef.GetKind() != "Service" {
+		return nil, fmt.Errorf("serviceRef must be to a Service resource, got %s", serviceRef.GetKind())
+	}
+	if serviceRef.GetAPIVersion() != "netguard.sgroups.io/v1alpha1" {
+		return nil, fmt.Errorf("serviceRef must be to a resource with APIVersion netguard.sgroups.io/v1alpha1, got %s", serviceRef.GetAPIVersion())
+	}
+
+	// Check if Service exists
+	service := &netguardv1alpha1.Service{}
+	serviceKey := client.ObjectKey{
+		Name:      serviceRef.GetName(),
+		Namespace: ResolveNamespace(serviceRef.GetNamespace(), policy.GetNamespace()),
+	}
+	if err := v.Client.Get(ctx, serviceKey, service); err != nil {
+		return nil, fmt.Errorf("service %s not found in namespace %s: %w",
+			serviceRef.GetName(),
+			ResolveNamespace(serviceRef.GetNamespace(), policy.GetNamespace()),
+			err)
+	}
+
+	// 1.2 Check that onRef (AddressGroupRef) exists
+	if addressGroupRef.GetName() == "" {
+		return nil, fmt.Errorf("addressGroupRef.name cannot be empty")
+	}
+	if addressGroupRef.GetKind() != "AddressGroup" {
+		return nil, fmt.Errorf("addressGroupRef must be to an AddressGroup resource, got %s", addressGroupRef.GetKind())
+	}
+	if addressGroupRef.GetAPIVersion() != "netguard.sgroups.io/v1alpha1" {
+		return nil, fmt.Errorf("addressGroupRef must be to a resource with APIVersion netguard.sgroups.io/v1alpha1, got %s", addressGroupRef.GetAPIVersion())
+	}
+
+	// 1.3 Check that there's no duplicate AddressGroupBindingPolicy
+	policyList := &netguardv1alpha1.AddressGroupBindingPolicyList{}
+	if err := v.Client.List(ctx, policyList, client.InNamespace(policy.GetNamespace())); err != nil {
+		return nil, fmt.Errorf("failed to list existing policies: %w", err)
+	}
+
+	for _, existingPolicy := range policyList.Items {
+		// Skip the current policy
+		if existingPolicy.GetName() == policy.GetName() && existingPolicy.GetNamespace() == policy.GetNamespace() {
+			continue
+		}
+
+		// Check if there's a policy with the same ServiceRef and AddressGroupRef
+		if existingPolicy.Spec.ServiceRef.GetName() == policy.Spec.ServiceRef.GetName() &&
+			existingPolicy.Spec.ServiceRef.GetNamespace() == policy.Spec.ServiceRef.GetNamespace() &&
+			existingPolicy.Spec.AddressGroupRef.GetName() == policy.Spec.AddressGroupRef.GetName() &&
+			existingPolicy.Spec.AddressGroupRef.GetNamespace() == policy.Spec.AddressGroupRef.GetNamespace() {
+			return nil, fmt.Errorf("duplicate policy found: policy %s already binds service %s to address group %s",
+				existingPolicy.GetName(),
+				policy.Spec.ServiceRef.GetName(),
+				policy.Spec.AddressGroupRef.GetName())
+		}
+	}
 
 	return nil, nil
 }
 
 // ValidateUpdate implements webhook.CustomValidator so a webhook will be registered for the type AddressGroupBindingPolicy.
 func (v *AddressGroupBindingPolicyCustomValidator) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.Object) (admission.Warnings, error) {
-	addressgroupbindingpolicy, ok := newObj.(*netguardv1alpha1.AddressGroupBindingPolicy)
+	oldPolicy, ok := oldObj.(*netguardv1alpha1.AddressGroupBindingPolicy)
 	if !ok {
-		return nil, fmt.Errorf("expected a AddressGroupBindingPolicy object for the newObj but got %T", newObj)
+		return nil, fmt.Errorf("expected a AddressGroupBindingPolicy object for oldObj but got %T", oldObj)
 	}
-	addressgroupbindingpolicylog.Info("Validation for AddressGroupBindingPolicy upon update", "name", addressgroupbindingpolicy.GetName())
 
-	// TODO(user): fill in your validation logic upon object update.
+	newPolicy, ok := newObj.(*netguardv1alpha1.AddressGroupBindingPolicy)
+	if !ok {
+		return nil, fmt.Errorf("expected a AddressGroupBindingPolicy object for newObj but got %T", newObj)
+	}
+	addressgroupbindingpolicylog.Info("Validation for AddressGroupBindingPolicy upon update", "name", newPolicy.GetName())
+
+	// Skip validation for resources being deleted
+	if SkipValidationForDeletion(ctx, newPolicy) {
+		return nil, nil
+	}
+
+	// 1.1 Ensure spec is immutable
+	// Check that ServiceRef hasn't changed
+	if err := ValidateObjectReferenceNotChanged(
+		&oldPolicy.Spec.ServiceRef,
+		&newPolicy.Spec.ServiceRef,
+		"spec.serviceRef"); err != nil {
+		return nil, err
+	}
+
+	// Check that AddressGroupRef hasn't changed
+	if err := ValidateObjectReferenceNotChanged(
+		&oldPolicy.Spec.AddressGroupRef,
+		&newPolicy.Spec.AddressGroupRef,
+		"spec.addressGroupRef"); err != nil {
+		return nil, err
+	}
+
+	// 1.2 Check that onRef (ServiceRef) exists
+	serviceRef := newPolicy.Spec.ServiceRef
+	service := &netguardv1alpha1.Service{}
+	serviceKey := client.ObjectKey{
+		Name:      serviceRef.GetName(),
+		Namespace: ResolveNamespace(serviceRef.GetNamespace(), newPolicy.GetNamespace()),
+	}
+	if err := v.Client.Get(ctx, serviceKey, service); err != nil {
+		return nil, fmt.Errorf("service %s not found: %w", serviceRef.GetName(), err)
+	}
+
+	// 1.2 Check that onRef (AddressGroupRef) exists
+	addressGroupRef := newPolicy.Spec.AddressGroupRef
+	addressGroupPortMapping := &netguardv1alpha1.AddressGroupPortMapping{}
+	addressGroupPortMappingKey := client.ObjectKey{
+		Name:      addressGroupRef.GetName(),
+		Namespace: ResolveNamespace(addressGroupRef.GetNamespace(), newPolicy.GetNamespace()),
+	}
+	if err := v.Client.Get(ctx, addressGroupPortMappingKey, addressGroupPortMapping); err != nil {
+		return nil, fmt.Errorf("addressGroup %s not found: %w", addressGroupRef.GetName(), err)
+	}
 
 	return nil, nil
 }
 
 // ValidateDelete implements webhook.CustomValidator so a webhook will be registered for the type AddressGroupBindingPolicy.
 func (v *AddressGroupBindingPolicyCustomValidator) ValidateDelete(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	addressgroupbindingpolicy, ok := obj.(*netguardv1alpha1.AddressGroupBindingPolicy)
+	policy, ok := obj.(*netguardv1alpha1.AddressGroupBindingPolicy)
 	if !ok {
 		return nil, fmt.Errorf("expected a AddressGroupBindingPolicy object but got %T", obj)
 	}
-	addressgroupbindingpolicylog.Info("Validation for AddressGroupBindingPolicy upon deletion", "name", addressgroupbindingpolicy.GetName())
+	addressgroupbindingpolicylog.Info("Validation for AddressGroupBindingPolicy upon deletion", "name", policy.GetName())
 
-	// TODO(user): fill in your validation logic upon object deletion.
+	// 1.1 Check that there are no active addressGroupBindings related to this policy
+	bindingList := &netguardv1alpha1.AddressGroupBindingList{}
+	if err := v.Client.List(ctx, bindingList, client.InNamespace(policy.GetNamespace())); err != nil {
+		return nil, fmt.Errorf("failed to list AddressGroupBindings: %w", err)
+	}
+
+	// Check if any binding references the same service and address group as the policy
+	for _, binding := range bindingList.Items {
+		if binding.Spec.ServiceRef.GetName() == policy.Spec.ServiceRef.GetName() &&
+			binding.Spec.AddressGroupRef.GetName() == policy.Spec.AddressGroupRef.GetName() &&
+			binding.Spec.AddressGroupRef.GetNamespace() == policy.Spec.AddressGroupRef.GetNamespace() {
+			return nil, fmt.Errorf("cannot delete policy while active AddressGroupBinding %s exists", binding.GetName())
+		}
+	}
 
 	return nil, nil
 }

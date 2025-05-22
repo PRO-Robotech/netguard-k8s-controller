@@ -19,9 +19,11 @@ package v1alpha1
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
@@ -36,7 +38,9 @@ var servicelog = logf.Log.WithName("service-resource")
 // SetupServiceWebhookWithManager registers the webhook for Service in the manager.
 func SetupServiceWebhookWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewWebhookManagedBy(mgr).For(&netguardv1alpha1.Service{}).
-		WithValidator(&ServiceCustomValidator{}).
+		WithValidator(&ServiceCustomValidator{
+			Client: mgr.GetClient(),
+		}).
 		Complete()
 }
 
@@ -53,7 +57,7 @@ func SetupServiceWebhookWithManager(mgr ctrl.Manager) error {
 // NOTE: The +kubebuilder:object:generate=false marker prevents controller-gen from generating DeepCopy methods,
 // as this struct is used only for temporary operations and does not need to be deeply copied.
 type ServiceCustomValidator struct {
-	// TODO(user): Add more fields as needed for validation
+	Client client.Client
 }
 
 var _ webhook.CustomValidator = &ServiceCustomValidator{}
@@ -66,20 +70,78 @@ func (v *ServiceCustomValidator) ValidateCreate(ctx context.Context, obj runtime
 	}
 	servicelog.Info("Validation for Service upon creation", "name", service.GetName())
 
-	// TODO(user): fill in your validation logic upon object creation.
+	// Validate all ports in the service
+	for _, ingressPort := range service.Spec.IngressPorts {
+		if err := ValidatePorts(ingressPort); err != nil {
+			return nil, err
+		}
+	}
 
 	return nil, nil
 }
 
 // ValidateUpdate implements webhook.CustomValidator so a webhook will be registered for the type Service.
 func (v *ServiceCustomValidator) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.Object) (admission.Warnings, error) {
-	service, ok := newObj.(*netguardv1alpha1.Service)
+	oldService, ok := oldObj.(*netguardv1alpha1.Service)
 	if !ok {
-		return nil, fmt.Errorf("expected a Service object for the newObj but got %T", newObj)
+		return nil, fmt.Errorf("expected a Service object for oldObj but got %T", oldObj)
 	}
-	servicelog.Info("Validation for Service upon update", "name", service.GetName())
 
-	// TODO(user): fill in your validation logic upon object update.
+	newService, ok := newObj.(*netguardv1alpha1.Service)
+	if !ok {
+		return nil, fmt.Errorf("expected a Service object for newObj but got %T", newObj)
+	}
+	servicelog.Info("Validation for Service upon update", "name", newService.GetName())
+
+	// Skip validation for resources being deleted
+	if SkipValidationForDeletion(ctx, newService) {
+		return nil, nil
+	}
+
+	// Validate all ports in the service
+	for _, ingressPort := range newService.Spec.IngressPorts {
+		if err := ValidatePorts(ingressPort); err != nil {
+			return nil, err
+		}
+	}
+
+	// Check if ports have been added or modified
+	if len(newService.Spec.IngressPorts) > len(oldService.Spec.IngressPorts) || !reflect.DeepEqual(oldService.Spec.IngressPorts, newService.Spec.IngressPorts) {
+		// Check if the service is bound to any AddressGroups
+		if len(newService.AddressGroups.Items) > 0 {
+			// For each AddressGroup, check for port overlaps
+			for _, addressGroupRef := range newService.AddressGroups.Items {
+				// Get the AddressGroupPortMapping
+				portMapping := &netguardv1alpha1.AddressGroupPortMapping{}
+				portMappingKey := client.ObjectKey{
+					Name:      addressGroupRef.GetName(),
+					Namespace: ResolveNamespace(addressGroupRef.GetNamespace(), newService.GetNamespace()),
+				}
+				if err := v.Client.Get(ctx, portMappingKey, portMapping); err != nil {
+					return nil, fmt.Errorf("addressGroupPortMapping for addressGroup %s not found: %w", addressGroupRef.GetName(), err)
+				}
+
+				// Create a temporary copy of portMapping for validation
+				tempPortMapping := portMapping.DeepCopy()
+
+				// Remove the current service from the temporary copy
+				for i := 0; i < len(tempPortMapping.AccessPorts.Items); i++ {
+					if tempPortMapping.AccessPorts.Items[i].GetName() == newService.GetName() &&
+						tempPortMapping.AccessPorts.Items[i].GetNamespace() == newService.GetNamespace() {
+						tempPortMapping.AccessPorts.Items = append(
+							tempPortMapping.AccessPorts.Items[:i],
+							tempPortMapping.AccessPorts.Items[i+1:]...)
+						break
+					}
+				}
+
+				// Check for port overlaps with the updated service
+				if err := CheckPortOverlaps(newService, tempPortMapping); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
 
 	return nil, nil
 }
