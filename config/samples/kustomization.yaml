@@ -4,4 +4,5 @@ resources:
 - netguard_v1alpha1_addressgroupbinding.yaml
 - netguard_v1alpha1_addressgroupportmapping.yaml
 - netguard_v1alpha1_addressgroupbindingpolicy.yaml
+- netguard_v1alpha1_servicealias.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

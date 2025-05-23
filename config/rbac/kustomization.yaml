@@ -22,6 +22,9 @@ resources:
 # default, aiding admins in cluster management. Those roles are
 # not used by the {{ .ProjectName }} itself. You can comment the following lines
 # if you do not want those helpers be installed with your Project.
+- servicealias_admin_role.yaml
+- servicealias_editor_role.yaml
+- servicealias_viewer_role.yaml
 - addressgroupbindingpolicy_admin_role.yaml
 - addressgroupbindingpolicy_editor_role.yaml
 - addressgroupbindingpolicy_viewer_role.yaml

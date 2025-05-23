@@ -126,6 +126,9 @@ var _ = BeforeSuite(func() {
 	err = SetupAddressGroupBindingPolicyWebhookWithManager(mgr)
 	Expect(err).NotTo(HaveOccurred())
 
+	err = SetupServiceAliasWebhookWithManager(mgr)
+	Expect(err).NotTo(HaveOccurred())
+
 	// +kubebuilder:scaffold:webhook
 
 	go func() {
