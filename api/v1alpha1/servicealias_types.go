@@ -25,17 +25,18 @@ import (
 
 // ServiceAliasSpec defines the desired state of ServiceAlias.
 type ServiceAliasSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-
-	// Foo is an example field of ServiceAlias. Edit servicealias_types.go to remove/update
-	Foo string `json:"foo,omitempty"`
+	// ServiceRef is a reference to the Service resource this alias points to
+	// +kubebuilder:validation:Required
+	ServiceRef NamespacedObjectReference `json:"serviceRef"`
 }
 
 // ServiceAliasStatus defines the observed state of ServiceAlias.
 type ServiceAliasStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// Conditions represent the latest available observations of the resource's state
+	// +optional
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
 }
 
 // +kubebuilder:object:root=true

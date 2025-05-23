@@ -1,13 +1,10 @@
 apiVersion: netguard.sgroups.io/v1alpha1
 kind: ServiceAlias
 metadata:
-  labels:
-    app.kubernetes.io/name: sgroups-k8s-netguard
-    app.kubernetes.io/managed-by: kustomize
-  name: servicealias-sample
+  name: database-alias
   namespace: default
 spec:
   serviceRef:
     apiVersion: netguard.sgroups.io/v1alpha1
     kind: Service
-    name: service-sample
+    name: database-service-example

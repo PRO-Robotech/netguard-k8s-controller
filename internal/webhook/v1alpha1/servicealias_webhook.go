@@ -19,9 +19,11 @@ package v1alpha1
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
@@ -36,7 +38,9 @@ var servicealiaslog = logf.Log.WithName("servicealias-resource")
 // SetupServiceAliasWebhookWithManager registers the webhook for ServiceAlias in the manager.
 func SetupServiceAliasWebhookWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewWebhookManagedBy(mgr).For(&netguardv1alpha1.ServiceAlias{}).
-		WithValidator(&ServiceAliasCustomValidator{}).
+		WithValidator(&ServiceAliasCustomValidator{
+			Client: mgr.GetClient(),
+		}).
 		Complete()
 }
 
@@ -53,33 +57,55 @@ func SetupServiceAliasWebhookWithManager(mgr ctrl.Manager) error {
 // NOTE: The +kubebuilder:object:generate=false marker prevents controller-gen from generating DeepCopy methods,
 // as this struct is used only for temporary operations and does not need to be deeply copied.
 type ServiceAliasCustomValidator struct {
-	// TODO(user): Add more fields as needed for validation
+	Client client.Client
 }
 
 var _ webhook.CustomValidator = &ServiceAliasCustomValidator{}
 
 // ValidateCreate implements webhook.CustomValidator so a webhook will be registered for the type ServiceAlias.
 func (v *ServiceAliasCustomValidator) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	servicealias, ok := obj.(*netguardv1alpha1.ServiceAlias)
+	serviceAlias, ok := obj.(*netguardv1alpha1.ServiceAlias)
 	if !ok {
 		return nil, fmt.Errorf("expected a ServiceAlias object but got %T", obj)
 	}
-	servicealiaslog.Info("Validation for ServiceAlias upon creation", "name", servicealias.GetName())
+	servicealiaslog.Info("Validation for ServiceAlias upon creation", "name", serviceAlias.GetName())
 
-	// TODO(user): fill in your validation logic upon object creation.
+	// Validate that the referenced Service exists
+	service := &netguardv1alpha1.Service{}
+	err := v.Client.Get(ctx, client.ObjectKey{
+		Name:      serviceAlias.Spec.ServiceRef.GetName(),
+		Namespace: serviceAlias.Spec.ServiceRef.ResolveNamespace(serviceAlias.GetNamespace()),
+	}, service)
+
+	if err != nil {
+		return nil, fmt.Errorf("referenced Service does not exist: %w", err)
+	}
 
 	return nil, nil
 }
 
 // ValidateUpdate implements webhook.CustomValidator so a webhook will be registered for the type ServiceAlias.
 func (v *ServiceAliasCustomValidator) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.Object) (admission.Warnings, error) {
-	servicealias, ok := newObj.(*netguardv1alpha1.ServiceAlias)
+	oldServiceAlias, ok := oldObj.(*netguardv1alpha1.ServiceAlias)
 	if !ok {
-		return nil, fmt.Errorf("expected a ServiceAlias object for the newObj but got %T", newObj)
+		return nil, fmt.Errorf("expected a ServiceAlias object for oldObj but got %T", oldObj)
 	}
-	servicealiaslog.Info("Validation for ServiceAlias upon update", "name", servicealias.GetName())
 
-	// TODO(user): fill in your validation logic upon object update.
+	newServiceAlias, ok := newObj.(*netguardv1alpha1.ServiceAlias)
+	if !ok {
+		return nil, fmt.Errorf("expected a ServiceAlias object for newObj but got %T", newObj)
+	}
+	servicealiaslog.Info("Validation for ServiceAlias upon update", "name", newServiceAlias.GetName())
+
+	// Skip validation for resources being deleted
+	if !newServiceAlias.DeletionTimestamp.IsZero() {
+		return nil, nil
+	}
+
+	// Check that spec hasn't changed (should be immutable)
+	if !reflect.DeepEqual(oldServiceAlias.Spec, newServiceAlias.Spec) {
+		return nil, fmt.Errorf("spec of ServiceAlias cannot be changed")
+	}
 
 	return nil, nil
 }

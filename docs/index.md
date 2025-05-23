@@ -9,10 +9,11 @@
 В системе Netguard используются следующие основные сущности:
 
 1. **Service** - представляет сервис, который может быть доступен через определенные порты и протоколы.
-2. **AddressGroup** - группа адресов, к которой могут быть привязаны сервисы.
-3. **AddressGroupPortMapping** - содержит информацию о портах, которые используются сервисами в рамках группы адресов.
-4. **AddressGroupBinding** - связывает сервис с группой адресов, определяя правила доступа.
-5. **AddressGroupBindingPolicy** - определяет политику, разрешающую кросс-неймспейс привязки между сервисами и группами адресов.
+2. **ServiceAlias** - представляет алиас для сервиса, позволяющий создавать дополнительные имена для одного и того же сервиса.
+3. **AddressGroup** - группа адресов, к которой могут быть привязаны сервисы.
+4. **AddressGroupPortMapping** - содержит информацию о портах, которые используются сервисами в рамках группы адресов.
+5. **AddressGroupBinding** - связывает сервис с группой адресов, определяя правила доступа.
+6. **AddressGroupBindingPolicy** - определяет политику, разрешающую кросс-неймспейс привязки между сервисами и группами адресов.
 
 ## Правила взаимодействия
 
@@ -33,6 +34,7 @@
 5. [Удаление политики AddressGroupBindingPolicy](scenarios/scenario_5.md)
 6. [Проверка перекрытия портов при создании привязки](scenarios/scenario_6.md)
 7. [Обновление привязки AddressGroupBinding](scenarios/scenario_7.md)
+8. [Создание и использование ServiceAlias](scenarios/scenario_8.md)
 
 ## Общая схема взаимодействия
 
@@ -41,6 +43,10 @@ classDiagram
     class Service {
         +IngressPorts[]
         +AddressGroups
+    }
+
+    class ServiceAlias {
+        +ServiceRef
     }
 
     class AddressGroup {
@@ -62,6 +68,7 @@ classDiagram
         +AddressGroupRef
     }
 
+    Service <-- ServiceAlias : ссылается
     Service <-- AddressGroupBinding : ссылается
     AddressGroup <-- AddressGroupBinding : ссылается
     AddressGroup <-- AddressGroupBindingPolicy : ссылается
