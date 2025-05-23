@@ -7,6 +7,7 @@ resources:
 - bases/netguard.sgroups.io_addressgroupportmappings.yaml
 - bases/netguard.sgroups.io_addressgroupbindingpolicies.yaml
 - bases/netguard.sgroups.io_servicealias.yaml
+- bases/netguard.sgroups.io_rules2s.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

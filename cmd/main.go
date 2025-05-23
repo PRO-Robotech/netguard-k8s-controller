@@ -273,6 +273,20 @@ func main() {
 			os.Exit(1)
 		}
 	}
+	if err = (&controller.RuleS2SReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "RuleS2S")
+		os.Exit(1)
+	}
+	// nolint:goconst
+	if os.Getenv("ENABLE_WEBHOOKS") != "false" {
+		if err = webhooknetguardv1alpha1.SetupRuleS2SWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create webhook", "webhook", "RuleS2S")
+			os.Exit(1)
+		}
+	}
 	// +kubebuilder:scaffold:builder
 
 	if metricsCertWatcher != nil {
