@@ -14,6 +14,7 @@
 4. **AddressGroupPortMapping** - содержит информацию о портах, которые используются сервисами в рамках группы адресов.
 5. **AddressGroupBinding** - связывает сервис с группой адресов, определяя правила доступа.
 6. **AddressGroupBindingPolicy** - определяет политику, разрешающую кросс-неймспейс привязки между сервисами и группами адресов.
+7. **RuleS2S** - определяет правила взаимодействия между сервисами в разных неймспейсах, на основе которых создаются правила IEAgAgRule в провайдере.
 
 ## Правила взаимодействия
 
@@ -35,6 +36,7 @@
 6. [Проверка перекрытия портов при создании привязки](scenarios/scenario_6.md)
 7. [Обновление привязки AddressGroupBinding](scenarios/scenario_7.md)
 8. [Создание и использование ServiceAlias](scenarios/scenario_8.md)
+9. [Создание правила RuleS2S для взаимодействия между сервисами](scenarios/scenario_9.md)
 
 ## Общая схема взаимодействия
 
@@ -43,6 +45,7 @@ classDiagram
     class Service {
         +IngressPorts[]
         +AddressGroups
+        +RuleS2SDstOwnRef
     }
 
     class ServiceAlias {
@@ -68,6 +71,12 @@ classDiagram
         +AddressGroupRef
     }
 
+    class RuleS2S {
+        +Traffic
+        +ServiceLocalRef
+        +ServiceRef
+    }
+
     Service <-- ServiceAlias : ссылается
     Service <-- AddressGroupBinding : ссылается
     AddressGroup <-- AddressGroupBinding : ссылается
@@ -75,6 +84,8 @@ classDiagram
     Service <-- AddressGroupBindingPolicy : ссылается
     AddressGroupBinding <-- AddressGroupBindingPolicy : проверяет
     AddressGroup -- AddressGroupPortMapping : имеет
+    Service <-- RuleS2S : ссылается
+    ServiceAlias <-- RuleS2S : ссылается
 ```
 
 ## Заключение
