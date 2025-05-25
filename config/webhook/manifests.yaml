@@ -41,6 +41,7 @@ webhooks:
     operations:
     - CREATE
     - UPDATE
+    - DELETE
     resources:
     - addressgroupbindingpolicies
   sideEffects: None
@@ -70,6 +71,26 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
+      path: /validate-netguard-sgroups-io-v1alpha1-rules2s
+  failurePolicy: Fail
+  name: vrules2s-v1alpha1.kb.io
+  rules:
+  - apiGroups:
+    - netguard.sgroups.io
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - rules2s
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
       path: /validate-netguard-sgroups-io-v1alpha1-service
   failurePolicy: Fail
   name: vservice-v1alpha1.kb.io
@@ -83,4 +104,24 @@ webhooks:
     - UPDATE
     resources:
     - services
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-netguard-sgroups-io-v1alpha1-servicealias
+  failurePolicy: Fail
+  name: vservicealias-v1alpha1.kb.io
+  rules:
+  - apiGroups:
+    - netguard.sgroups.io
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - servicealias
   sideEffects: None

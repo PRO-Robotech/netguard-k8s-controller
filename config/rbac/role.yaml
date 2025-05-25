@@ -10,6 +10,8 @@ rules:
   - addressgroupbindingpolicies
   - addressgroupbindings
   - addressgroupportmappings
+  - rules2s
+  - servicealiases
   - services
   verbs:
   - create
@@ -25,6 +27,8 @@ rules:
   - addressgroupbindingpolicies/finalizers
   - addressgroupbindings/finalizers
   - addressgroupportmappings/finalizers
+  - rules2s/finalizers
+  - servicealiases/finalizers
   - services/finalizers
   verbs:
   - update
@@ -34,8 +38,22 @@ rules:
   - addressgroupbindingpolicies/status
   - addressgroupbindings/status
   - addressgroupportmappings/status
+  - rules2s/status
+  - servicealiases/status
   - services/status
   verbs:
   - get
   - patch
   - update
+- apiGroups:
+  - provider.sgroups.io
+  resources:
+  - ieagagrules
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch

@@ -4,50 +4,21 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.17.1
-  name: services.netguard.sgroups.io
+  name: rules2ses.netguard.sgroups.io
 spec:
   group: netguard.sgroups.io
   names:
-    kind: Service
-    listKind: ServiceList
-    plural: services
-    singular: service
+    kind: RuleS2S
+    listKind: RuleS2SList
+    plural: rules2ses
+    singular: rules2s
   scope: Namespaced
   versions:
   - name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: Service is the Schema for the services API.
+        description: RuleS2S is the Schema for the rules2s API.
         properties:
-          addressGroups:
-            description: AddressGroupsSpec defines the address groups associated with
-              a Service.
-            properties:
-              items:
-                description: Items contains the list of address groups
-                items:
-                  description: NamespacedObjectReference extends ObjectReference with
-                    a Namespace field
-                  properties:
-                    apiVersion:
-                      description: APIVersion of the referenced object
-                      type: string
-                    kind:
-                      description: Kind of the referenced object
-                      type: string
-                    name:
-                      description: Name of the referenced object
-                      type: string
-                    namespace:
-                      description: Namespace of the referenced object
-                      type: string
-                  required:
-                  - apiVersion
-                  - kind
-                  - name
-                  type: object
-                type: array
-            type: object
           apiVersion:
             description: |-
               APIVersion defines the versioned schema of this representation of an object.
@@ -65,67 +36,62 @@ spec:
             type: string
           metadata:
             type: object
-          ruleS2SDstOwnRef:
-            description: RuleS2SDstOwnRefSpec defines the RuleS2S objects that reference
-              this Service from other namespaces
-            properties:
-              items:
-                description: Items contains the list of RuleS2S references
-                items:
-                  description: NamespacedObjectReference extends ObjectReference with
-                    a Namespace field
-                  properties:
-                    apiVersion:
-                      description: APIVersion of the referenced object
-                      type: string
-                    kind:
-                      description: Kind of the referenced object
-                      type: string
-                    name:
-                      description: Name of the referenced object
-                      type: string
-                    namespace:
-                      description: Namespace of the referenced object
-                      type: string
-                  required:
-                  - apiVersion
-                  - kind
-                  - name
-                  type: object
-                type: array
-            type: object
           spec:
-            description: ServiceSpec defines the desired state of Service.
+            description: RuleS2SSpec defines the desired state of RuleS2S.
             properties:
-              description:
+              serviceLocalRef:
+                description: ServiceLocalRef is a reference to the local service
+                properties:
+                  apiVersion:
+                    description: APIVersion of the referenced object
+                    type: string
+                  kind:
+                    description: Kind of the referenced object
+                    type: string
+                  name:
+                    description: Name of the referenced object
+                    type: string
+                  namespace:
+                    description: Namespace of the referenced object
+                    type: string
+                required:
+                - apiVersion
+                - kind
+                - name
+                type: object
+              serviceRef:
+                description: ServiceRef is a reference to the target service
+                properties:
+                  apiVersion:
+                    description: APIVersion of the referenced object
+                    type: string
+                  kind:
+                    description: Kind of the referenced object
+                    type: string
+                  name:
+                    description: Name of the referenced object
+                    type: string
+                  namespace:
+                    description: Namespace of the referenced object
+                    type: string
+                required:
+                - apiVersion
+                - kind
+                - name
+                type: object
+              traffic:
+                description: 'Traffic direction: ingress or egress'
+                enum:
+                - ingress
+                - egress
                 type: string
-              ingressPorts:
-                description: IngressPorts defines the ports that are allowed for ingress
-                  traffic
-                items:
-                  description: IngressPort defines a port configuration for ingress
-                    traffic
-                  properties:
-                    description:
-                      description: Description of this port configuration
-                      type: string
-                    port:
-                      description: Port or port range (e.g., "80", "8080-9090")
-                      type: string
-                    protocol:
-                      description: Transport protocol for the rule
-                      enum:
-                      - TCP
-                      - UDP
-                      type: string
-                  required:
-                  - port
-                  - protocol
-                  type: object
-                type: array
+            required:
+            - serviceLocalRef
+            - serviceRef
+            - traffic
             type: object
           status:
-            description: ServiceStatus defines the observed state of Service.
+            description: RuleS2SStatus defines the observed state of RuleS2S.
             properties:
               conditions:
                 description: Conditions represent the latest available observations

@@ -18,11 +18,19 @@ package controller
 
 import (
 	"context"
+	"fmt"
+	"strings"
+	"time"
 
+	"github.com/go-logr/logr"
+	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	netguardv1alpha1 "sgroups.io/netguard/api/v1alpha1"
 )
@@ -31,27 +39,310 @@ import (
 type RuleS2SReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+	Log    logr.Logger
 }
 
 // +kubebuilder:rbac:groups=netguard.sgroups.io,resources=rules2s,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=netguard.sgroups.io,resources=rules2s/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=netguard.sgroups.io,resources=rules2s/finalizers,verbs=update
+// +kubebuilder:rbac:groups=netguard.sgroups.io,resources=services,verbs=get;list;watch
+// +kubebuilder:rbac:groups=netguard.sgroups.io,resources=servicealiases,verbs=get;list;watch
+// +kubebuilder:rbac:groups=provider.sgroups.io,resources=ieagagrules,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the RuleS2S object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
-//
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.20.0/pkg/reconcile
 func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = log.FromContext(ctx)
+	log := r.Log.WithValues("rules2s", req.NamespacedName)
+	log.Info("Reconciling RuleS2S")
 
-	// TODO(user): your logic here
+	// Fetch the RuleS2S instance
+	ruleS2S := &netguardv1alpha1.RuleS2S{}
+	if err := r.Get(ctx, req.NamespacedName, ruleS2S); err != nil {
+		if errors.IsNotFound(err) {
+			// Object not found, could have been deleted after reconcile request
+			return ctrl.Result{}, nil
+		}
+		// Error reading the object - requeue the request
+		return ctrl.Result{}, err
+	}
+
+	// Check if the resource is being deleted
+	if !ruleS2S.DeletionTimestamp.IsZero() {
+		// Resource is being deleted, no need to do anything as owner references
+		// will handle the deletion of child resources
+		return ctrl.Result{}, nil
+	}
+
+	// Get the ServiceAlias objects
+	localServiceAlias := &netguardv1alpha1.ServiceAlias{}
+	if err := r.Get(ctx, types.NamespacedName{
+		Namespace: ruleS2S.Namespace,
+		Name:      ruleS2S.Spec.ServiceLocalRef.Name,
+	}, localServiceAlias); err != nil {
+		// Update status with error condition
+		meta.SetStatusCondition(&ruleS2S.Status.Conditions, metav1.Condition{
+			Type:    netguardv1alpha1.ConditionReady,
+			Status:  metav1.ConditionFalse,
+			Reason:  "ServiceAliasNotFound",
+			Message: fmt.Sprintf("Local service alias not found: %v", err),
+		})
+		if err := r.Status().Update(ctx, ruleS2S); err != nil {
+			log.Error(err, "Failed to update RuleS2S status")
+		}
+		return ctrl.Result{RequeueAfter: time.Minute}, err
+	}
+
+	targetServiceAlias := &netguardv1alpha1.ServiceAlias{}
+	targetNamespace := ruleS2S.Spec.ServiceRef.ResolveNamespace(ruleS2S.Namespace)
+	if err := r.Get(ctx, types.NamespacedName{
+		Namespace: targetNamespace,
+		Name:      ruleS2S.Spec.ServiceRef.Name,
+	}, targetServiceAlias); err != nil {
+		// Update status with error condition
+		meta.SetStatusCondition(&ruleS2S.Status.Conditions, metav1.Condition{
+			Type:    netguardv1alpha1.ConditionReady,
+			Status:  metav1.ConditionFalse,
+			Reason:  "ServiceAliasNotFound",
+			Message: fmt.Sprintf("Target service alias not found: %v", err),
+		})
+		if err := r.Status().Update(ctx, ruleS2S); err != nil {
+			log.Error(err, "Failed to update RuleS2S status")
+		}
+		return ctrl.Result{RequeueAfter: time.Minute}, err
+	}
+
+	// Get the actual Service objects
+	localService := &netguardv1alpha1.Service{}
+	localServiceNamespace := localServiceAlias.Spec.ServiceRef.ResolveNamespace(localServiceAlias.Namespace)
+	if err := r.Get(ctx, types.NamespacedName{
+		Namespace: localServiceNamespace,
+		Name:      localServiceAlias.Spec.ServiceRef.Name,
+	}, localService); err != nil {
+		// Update status with error condition
+		meta.SetStatusCondition(&ruleS2S.Status.Conditions, metav1.Condition{
+			Type:    netguardv1alpha1.ConditionReady,
+			Status:  metav1.ConditionFalse,
+			Reason:  "ServiceNotFound",
+			Message: fmt.Sprintf("Local service not found: %v", err),
+		})
+		if err := r.Status().Update(ctx, ruleS2S); err != nil {
+			log.Error(err, "Failed to update RuleS2S status")
+		}
+		return ctrl.Result{RequeueAfter: time.Minute}, err
+	}
+
+	targetService := &netguardv1alpha1.Service{}
+	targetServiceNamespace := targetServiceAlias.Spec.ServiceRef.ResolveNamespace(targetServiceAlias.Namespace)
+	if err := r.Get(ctx, types.NamespacedName{
+		Namespace: targetServiceNamespace,
+		Name:      targetServiceAlias.Spec.ServiceRef.Name,
+	}, targetService); err != nil {
+		// Update status with error condition
+		meta.SetStatusCondition(&ruleS2S.Status.Conditions, metav1.Condition{
+			Type:    netguardv1alpha1.ConditionReady,
+			Status:  metav1.ConditionFalse,
+			Reason:  "ServiceNotFound",
+			Message: fmt.Sprintf("Target service not found: %v", err),
+		})
+		if err := r.Status().Update(ctx, ruleS2S); err != nil {
+			log.Error(err, "Failed to update RuleS2S status")
+		}
+		return ctrl.Result{RequeueAfter: time.Minute}, err
+	}
+
+	// Update RuleS2SDstOwnRef for cross-namespace references
+	if ruleS2S.Namespace != targetServiceNamespace {
+		// Add this rule to the target service's RuleS2SDstOwnRef
+		found := false
+		for _, ref := range targetService.RuleS2SDstOwnRef.Items {
+			if ref.Name == ruleS2S.Name && ref.Namespace == ruleS2S.Namespace {
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			targetService.RuleS2SDstOwnRef.Items = append(targetService.RuleS2SDstOwnRef.Items,
+				netguardv1alpha1.NamespacedObjectReference{
+					ObjectReference: netguardv1alpha1.ObjectReference{
+						APIVersion: "netguard.sgroups.io/v1alpha1",
+						Kind:       "RuleS2S",
+						Name:       ruleS2S.Name,
+					},
+					Namespace: ruleS2S.Namespace,
+				})
+
+			if err := r.Update(ctx, targetService); err != nil {
+				log.Error(err, "Failed to update target service RuleS2SDstOwnRef")
+				return ctrl.Result{RequeueAfter: time.Minute}, err
+			}
+		}
+	} else {
+		// For rules in the same namespace, use owner references
+		if err := controllerutil.SetControllerReference(targetService, ruleS2S, r.Scheme); err != nil {
+			log.Error(err, "Failed to set owner reference")
+			return ctrl.Result{RequeueAfter: time.Minute}, err
+		}
+		if err := r.Update(ctx, ruleS2S); err != nil {
+			log.Error(err, "Failed to update RuleS2S with owner reference")
+			return ctrl.Result{RequeueAfter: time.Minute}, err
+		}
+	}
+
+	// Get address groups from services
+	localAddressGroups := localService.AddressGroups.Items
+	targetAddressGroups := targetService.AddressGroups.Items
+
+	if len(localAddressGroups) == 0 || len(targetAddressGroups) == 0 {
+		// Update status with error condition
+		meta.SetStatusCondition(&ruleS2S.Status.Conditions, metav1.Condition{
+			Type:    netguardv1alpha1.ConditionReady,
+			Status:  metav1.ConditionFalse,
+			Reason:  "NoAddressGroups",
+			Message: "One or both services have no address groups",
+		})
+		if err := r.Status().Update(ctx, ruleS2S); err != nil {
+			log.Error(err, "Failed to update RuleS2S status")
+		}
+		return ctrl.Result{RequeueAfter: time.Minute}, fmt.Errorf("one or both services have no address groups")
+	}
+
+	// Determine which ports to use based on traffic direction
+	var ports []netguardv1alpha1.IngressPort
+	if ruleS2S.Spec.Traffic == "ingress" {
+		// For ingress, use ports from the local service (receiver)
+		ports = localService.Spec.IngressPorts
+	} else {
+		// For egress, use ports from the target service (receiver)
+		ports = targetService.Spec.IngressPorts
+	}
+
+	if len(ports) == 0 {
+		// Update status with error condition
+		meta.SetStatusCondition(&ruleS2S.Status.Conditions, metav1.Condition{
+			Type:    netguardv1alpha1.ConditionReady,
+			Status:  metav1.ConditionFalse,
+			Reason:  "NoPorts",
+			Message: "No ports defined for the service",
+		})
+		if err := r.Status().Update(ctx, ruleS2S); err != nil {
+			log.Error(err, "Failed to update RuleS2S status")
+		}
+		return ctrl.Result{RequeueAfter: time.Minute}, fmt.Errorf("no ports defined for the service")
+	}
+
+	// Create IEAgAgRule resources for each combination of address groups and ports
+	createdRules := []string{}
+	for _, localAG := range localAddressGroups {
+		for _, targetAG := range targetAddressGroups {
+			// Group ports by protocol
+			tcpPorts := []string{}
+			udpPorts := []string{}
+
+			for _, port := range ports {
+				if port.Protocol == netguardv1alpha1.ProtocolTCP {
+					tcpPorts = append(tcpPorts, port.Port)
+				} else if port.Protocol == netguardv1alpha1.ProtocolUDP {
+					udpPorts = append(udpPorts, port.Port)
+				}
+			}
+
+			// Create TCP rule if there are TCP ports
+			if len(tcpPorts) > 0 {
+				// Combine all TCP ports into a single comma-separated string
+				combinedTcpPorts := strings.Join(tcpPorts, ",")
+
+				// Create or update the rule
+				ruleName, err := r.createOrUpdateIEAgAgRule(ctx, ruleS2S, localAG, targetAG,
+					netguardv1alpha1.ProtocolTCP, combinedTcpPorts)
+				if err != nil {
+					log.Error(err, "Failed to create/update TCP rule")
+					continue
+				}
+				createdRules = append(createdRules, ruleName)
+			}
+
+			// Create UDP rule if there are UDP ports
+			if len(udpPorts) > 0 {
+				// Combine all UDP ports into a single comma-separated string
+				combinedUdpPorts := strings.Join(udpPorts, ",")
+
+				// Create or update the rule
+				ruleName, err := r.createOrUpdateIEAgAgRule(ctx, ruleS2S, localAG, targetAG,
+					netguardv1alpha1.ProtocolUDP, combinedUdpPorts)
+				if err != nil {
+					log.Error(err, "Failed to create/update UDP rule")
+					continue
+				}
+				createdRules = append(createdRules, ruleName)
+			}
+		}
+	}
+
+	// Update status to Ready if we created at least one rule
+	if len(createdRules) > 0 {
+		meta.SetStatusCondition(&ruleS2S.Status.Conditions, metav1.Condition{
+			Type:    netguardv1alpha1.ConditionReady,
+			Status:  metav1.ConditionTrue,
+			Reason:  "RulesCreated",
+			Message: fmt.Sprintf("Created rules: %s", strings.Join(createdRules, ", ")),
+		})
+		if err := r.Status().Update(ctx, ruleS2S); err != nil {
+			log.Error(err, "Failed to update RuleS2S status")
+			return ctrl.Result{}, err
+		}
+	} else {
+		meta.SetStatusCondition(&ruleS2S.Status.Conditions, metav1.Condition{
+			Type:    netguardv1alpha1.ConditionReady,
+			Status:  metav1.ConditionFalse,
+			Reason:  "NoRulesCreated",
+			Message: "Failed to create any rules",
+		})
+		if err := r.Status().Update(ctx, ruleS2S); err != nil {
+			log.Error(err, "Failed to update RuleS2S status")
+		}
+		return ctrl.Result{RequeueAfter: time.Minute}, fmt.Errorf("failed to create any rules")
+	}
 
 	return ctrl.Result{}, nil
+}
+
+// createOrUpdateIEAgAgRule creates or updates an IEAgAgRule
+// This is a placeholder implementation that will be updated when we have more information about the provider API
+func (r *RuleS2SReconciler) createOrUpdateIEAgAgRule(
+	ctx context.Context,
+	ruleS2S *netguardv1alpha1.RuleS2S,
+	localAG netguardv1alpha1.NamespacedObjectReference,
+	targetAG netguardv1alpha1.NamespacedObjectReference,
+	protocol netguardv1alpha1.TransportProtocol,
+	portsStr string,
+) (string, error) {
+	// Determine namespace for the rule based on traffic direction
+	var ruleNamespace string
+	if ruleS2S.Spec.Traffic == "ingress" {
+		// For ingress, rule goes in the local AG namespace (receiver)
+		ruleNamespace = localAG.ResolveNamespace(localAG.GetNamespace())
+	} else {
+		// For egress, rule goes in the target AG namespace (receiver)
+		ruleNamespace = targetAG.ResolveNamespace(targetAG.GetNamespace())
+	}
+
+	// Create rule name
+	ruleName := fmt.Sprintf("%s-%s-%s-%s",
+		strings.ToLower(ruleS2S.Spec.Traffic),
+		localAG.Name,
+		targetAG.Name,
+		strings.ToLower(string(protocol)))
+
+	// TODO: Create or update the IEAgAgRule resource
+	// This is a placeholder implementation that will be updated when we have more information about the provider API
+
+	// Log the namespace where the rule would be created
+	r.Log.Info("Would create IEAgAgRule", "namespace", ruleNamespace, "name", ruleName)
+
+	return ruleName, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

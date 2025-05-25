@@ -39,6 +39,12 @@ type AddressGroupsSpec struct {
 	Items []NamespacedObjectReference `json:"items,omitempty"`
 }
 
+// RuleS2SDstOwnRefSpec defines the RuleS2S objects that reference this Service from other namespaces
+type RuleS2SDstOwnRefSpec struct {
+	// Items contains the list of RuleS2S references
+	Items []NamespacedObjectReference `json:"items,omitempty"`
+}
+
 // IngressPort defines a port configuration for ingress traffic
 type IngressPort struct {
 	// Transport protocol for the rule
@@ -65,15 +71,17 @@ type ServiceStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:subresource:addressGroups
+// +kubebuilder:subresource:ruleS2SDstOwnRef
 
 // Service is the Schema for the services API.
 type Service struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec          ServiceSpec       `json:"spec,omitempty"`
-	Status        ServiceStatus     `json:"status,omitempty"`
-	AddressGroups AddressGroupsSpec `json:"addressGroups,omitempty"`
+	Spec             ServiceSpec          `json:"spec,omitempty"`
+	Status           ServiceStatus        `json:"status,omitempty"`
+	AddressGroups    AddressGroupsSpec    `json:"addressGroups,omitempty"`
+	RuleS2SDstOwnRef RuleS2SDstOwnRefSpec `json:"ruleS2SDstOwnRef,omitempty"`
 }
 
 // +kubebuilder:object:root=true

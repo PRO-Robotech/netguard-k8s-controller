@@ -25,17 +25,27 @@ import (
 
 // RuleS2SSpec defines the desired state of RuleS2S.
 type RuleS2SSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// Traffic direction: ingress or egress
+	// +kubebuilder:validation:Enum=ingress;egress
+	// +kubebuilder:validation:Required
+	Traffic string `json:"traffic"`
 
-	// Foo is an example field of RuleS2S. Edit rules2s_types.go to remove/update
-	Foo string `json:"foo,omitempty"`
+	// ServiceLocalRef is a reference to the local service
+	// +kubebuilder:validation:Required
+	ServiceLocalRef NamespacedObjectReference `json:"serviceLocalRef"`
+
+	// ServiceRef is a reference to the target service
+	// +kubebuilder:validation:Required
+	ServiceRef NamespacedObjectReference `json:"serviceRef"`
 }
 
 // RuleS2SStatus defines the observed state of RuleS2S.
 type RuleS2SStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// Conditions represent the latest available observations of the resource's state
+	// +optional
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
 }
 
 // +kubebuilder:object:root=true

@@ -19,9 +19,12 @@ package v1alpha1
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
@@ -36,7 +39,9 @@ var rules2slog = logf.Log.WithName("rules2s-resource")
 // SetupRuleS2SWebhookWithManager registers the webhook for RuleS2S in the manager.
 func SetupRuleS2SWebhookWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewWebhookManagedBy(mgr).For(&netguardv1alpha1.RuleS2S{}).
-		WithValidator(&RuleS2SCustomValidator{}).
+		WithValidator(&RuleS2SCustomValidator{
+			Client: mgr.GetClient(),
+		}).
 		Complete()
 }
 
@@ -52,34 +57,72 @@ func SetupRuleS2SWebhookWithManager(mgr ctrl.Manager) error {
 //
 // NOTE: The +kubebuilder:object:generate=false marker prevents controller-gen from generating DeepCopy methods,
 // as this struct is used only for temporary operations and does not need to be deeply copied.
+// +kubebuilder:object:generate=false
 type RuleS2SCustomValidator struct {
-	// TODO(user): Add more fields as needed for validation
+	Client client.Client
 }
 
 var _ webhook.CustomValidator = &RuleS2SCustomValidator{}
 
 // ValidateCreate implements webhook.CustomValidator so a webhook will be registered for the type RuleS2S.
 func (v *RuleS2SCustomValidator) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	rules2s, ok := obj.(*netguardv1alpha1.RuleS2S)
+	rule, ok := obj.(*netguardv1alpha1.RuleS2S)
 	if !ok {
 		return nil, fmt.Errorf("expected a RuleS2S object but got %T", obj)
 	}
-	rules2slog.Info("Validation for RuleS2S upon creation", "name", rules2s.GetName())
+	rules2slog.Info("Validation for RuleS2S upon creation", "name", rule.GetName())
 
-	// TODO(user): fill in your validation logic upon object creation.
+	// Validate that serviceLocalRef exists
+	localServiceAlias := &netguardv1alpha1.ServiceAlias{}
+	localServiceNamespace := rule.Namespace
+	localServiceName := rule.Spec.ServiceLocalRef.Name
+
+	if err := v.Client.Get(ctx, types.NamespacedName{
+		Namespace: localServiceNamespace,
+		Name:      localServiceName,
+	}, localServiceAlias); err != nil {
+		return nil, fmt.Errorf("serviceLocalRef %s/%s does not exist: %w",
+			localServiceNamespace, localServiceName, err)
+	}
+
+	// Validate that serviceRef exists
+	targetServiceAlias := &netguardv1alpha1.ServiceAlias{}
+	targetServiceNamespace := rule.Spec.ServiceRef.ResolveNamespace(rule.Namespace)
+	targetServiceName := rule.Spec.ServiceRef.Name
+
+	if err := v.Client.Get(ctx, types.NamespacedName{
+		Namespace: targetServiceNamespace,
+		Name:      targetServiceName,
+	}, targetServiceAlias); err != nil {
+		return nil, fmt.Errorf("serviceRef %s/%s does not exist: %w",
+			targetServiceNamespace, targetServiceName, err)
+	}
 
 	return nil, nil
 }
 
 // ValidateUpdate implements webhook.CustomValidator so a webhook will be registered for the type RuleS2S.
 func (v *RuleS2SCustomValidator) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.Object) (admission.Warnings, error) {
-	rules2s, ok := newObj.(*netguardv1alpha1.RuleS2S)
+	oldRule, ok := oldObj.(*netguardv1alpha1.RuleS2S)
 	if !ok {
-		return nil, fmt.Errorf("expected a RuleS2S object for the newObj but got %T", newObj)
+		return nil, fmt.Errorf("expected a RuleS2S object for oldObj but got %T", oldObj)
 	}
-	rules2slog.Info("Validation for RuleS2S upon update", "name", rules2s.GetName())
 
-	// TODO(user): fill in your validation logic upon object update.
+	newRule, ok := newObj.(*netguardv1alpha1.RuleS2S)
+	if !ok {
+		return nil, fmt.Errorf("expected a RuleS2S object for newObj but got %T", newObj)
+	}
+	rules2slog.Info("Validation for RuleS2S upon update", "name", newRule.GetName())
+
+	// Skip validation for resources being deleted
+	if !newRule.DeletionTimestamp.IsZero() {
+		return nil, nil
+	}
+
+	// Check that spec hasn't changed (spec is immutable)
+	if !reflect.DeepEqual(oldRule.Spec, newRule.Spec) {
+		return nil, fmt.Errorf("spec of RuleS2S cannot be changed")
+	}
 
 	return nil, nil
 }
