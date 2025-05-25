@@ -34,6 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	netguardv1alpha1 "sgroups.io/netguard/api/v1alpha1"
+	providerv1alpha1 "sgroups.io/netguard/deps/apis/sgroups-k8s-provider/v1alpha1"
 	"sgroups.io/netguard/internal/webhook/v1alpha1"
 )
 
@@ -48,6 +49,7 @@ type AddressGroupBindingReconciler struct {
 // +kubebuilder:rbac:groups=netguard.sgroups.io,resources=addressgroupbindings/finalizers,verbs=update
 // +kubebuilder:rbac:groups=netguard.sgroups.io,resources=services,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=netguard.sgroups.io,resources=addressgroupportmappings,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups=sgroups.io,resources=addressgroups,verbs=get;list;watch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -115,26 +117,58 @@ func (r *AddressGroupBindingReconciler) reconcileNormal(ctx context.Context, bin
 		return ctrl.Result{}, err
 	}
 
-	// 2. Get the AddressGroupPortMapping
+	// 2. Get the AddressGroup
 	addressGroupRef := binding.Spec.AddressGroupRef
-	portMapping := &netguardv1alpha1.AddressGroupPortMapping{}
-	portMappingKey := client.ObjectKey{
-		Name:      addressGroupRef.GetName(), // Port mapping has the same name as the address group
-		Namespace: v1alpha1.ResolveNamespace(addressGroupRef.GetNamespace(), binding.GetNamespace()),
+	addressGroupNamespace := v1alpha1.ResolveNamespace(addressGroupRef.GetNamespace(), binding.GetNamespace())
+
+	addressGroup := &providerv1alpha1.AddressGroup{}
+	addressGroupKey := client.ObjectKey{
+		Name:      addressGroupRef.GetName(),
+		Namespace: addressGroupNamespace,
 	}
-	if err := r.Get(ctx, portMappingKey, portMapping); err != nil {
+	if err := r.Get(ctx, addressGroupKey, addressGroup); err != nil {
 		if apierrors.IsNotFound(err) {
-			// Set condition to indicate that the AddressGroupPortMapping was not found
-			setCondition(binding, netguardv1alpha1.ConditionReady, metav1.ConditionFalse, "PortMappingNotFound",
-				fmt.Sprintf("AddressGroupPortMapping for AddressGroup %s not found", addressGroupRef.GetName()))
+			// Set condition to indicate that the AddressGroup was not found
+			setCondition(binding, netguardv1alpha1.ConditionReady, metav1.ConditionFalse, "AddressGroupNotFound",
+				fmt.Sprintf("AddressGroup %s not found in namespace %s", addressGroupRef.GetName(), addressGroupNamespace))
 			if err := r.Status().Update(ctx, binding); err != nil {
 				logger.Error(err, "Failed to update AddressGroupBinding status")
 				return ctrl.Result{}, err
 			}
 			return ctrl.Result{RequeueAfter: time.Minute}, nil
 		}
-		logger.Error(err, "Failed to get AddressGroupPortMapping")
+		logger.Error(err, "Failed to get AddressGroup")
 		return ctrl.Result{}, err
+	}
+
+	// 2.1 Get the AddressGroupPortMapping for port information
+	portMapping := &netguardv1alpha1.AddressGroupPortMapping{}
+	portMappingKey := client.ObjectKey{
+		Name:      addressGroupRef.GetName(), // Port mapping has the same name as the address group
+		Namespace: addressGroupNamespace,
+	}
+	if err := r.Get(ctx, portMappingKey, portMapping); err != nil {
+		if apierrors.IsNotFound(err) {
+			// Create a new AddressGroupPortMapping if it doesn't exist
+			portMapping = &netguardv1alpha1.AddressGroupPortMapping{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      addressGroupRef.GetName(),
+					Namespace: addressGroupNamespace,
+				},
+				Spec: netguardv1alpha1.AddressGroupPortMappingSpec{},
+				AccessPorts: netguardv1alpha1.AccessPortsSpec{
+					Items: []netguardv1alpha1.ServicePortsRef{},
+				},
+			}
+			if err := r.Create(ctx, portMapping); err != nil {
+				logger.Error(err, "Failed to create AddressGroupPortMapping")
+				return ctrl.Result{}, err
+			}
+			logger.Info("Created new AddressGroupPortMapping", "name", portMapping.GetName(), "namespace", portMapping.GetNamespace())
+		} else {
+			logger.Error(err, "Failed to get AddressGroupPortMapping")
+			return ctrl.Result{}, err
+		}
 	}
 
 	// 3. Update Service.AddressGroups
@@ -389,6 +423,38 @@ func (r *AddressGroupBindingReconciler) findBindingsForPortMapping(ctx context.C
 	return requests
 }
 
+// findBindingsForAddressGroup finds bindings that reference an address group
+func (r *AddressGroupBindingReconciler) findBindingsForAddressGroup(ctx context.Context, obj client.Object) []reconcile.Request {
+	addressGroup, ok := obj.(*providerv1alpha1.AddressGroup)
+	if !ok {
+		return nil
+	}
+
+	// Get all AddressGroupBinding
+	bindingList := &netguardv1alpha1.AddressGroupBindingList{}
+	if err := r.List(ctx, bindingList); err != nil {
+		return nil
+	}
+
+	var requests []reconcile.Request
+
+	// Filter bindings that reference this address group
+	for _, binding := range bindingList.Items {
+		if binding.Spec.AddressGroupRef.GetName() == addressGroup.GetName() &&
+			(binding.Spec.AddressGroupRef.GetNamespace() == addressGroup.GetNamespace() ||
+				binding.Spec.AddressGroupRef.GetNamespace() == "") {
+			requests = append(requests, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      binding.GetName(),
+					Namespace: binding.GetNamespace(),
+				},
+			})
+		}
+	}
+
+	return requests
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *AddressGroupBindingReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
@@ -398,7 +464,12 @@ func (r *AddressGroupBindingReconciler) SetupWithManager(mgr ctrl.Manager) error
 			&netguardv1alpha1.Service{},
 			handler.EnqueueRequestsFromMapFunc(r.findBindingsForService),
 		).
-		// Watch for changes to AddressGroupPortMapping
+		// Watch for changes to AddressGroup
+		Watches(
+			&providerv1alpha1.AddressGroup{},
+			handler.EnqueueRequestsFromMapFunc(r.findBindingsForAddressGroup),
+		).
+		// Watch for changes to AddressGroupPortMapping (for backward compatibility)
 		Watches(
 			&netguardv1alpha1.AddressGroupPortMapping{},
 			handler.EnqueueRequestsFromMapFunc(r.findBindingsForPortMapping),

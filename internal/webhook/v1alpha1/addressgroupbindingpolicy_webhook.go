@@ -28,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	netguardv1alpha1 "sgroups.io/netguard/api/v1alpha1"
+	providerv1alpha1 "sgroups.io/netguard/deps/apis/sgroups-k8s-provider/v1alpha1"
 )
 
 // nolint:unused
@@ -77,17 +78,26 @@ func (v *AddressGroupBindingPolicyCustomValidator) ValidateCreate(ctx context.Co
 		return nil, fmt.Errorf("policy must be created in the same namespace as the referenced address group")
 	}
 
-	addressGroupPortMapping := &netguardv1alpha1.AddressGroupPortMapping{}
-	addressGroupPortMappingKey := client.ObjectKey{
+	// Check if AddressGroup exists directly
+	addressGroup := &providerv1alpha1.AddressGroup{}
+	addressGroupKey := client.ObjectKey{
 		Name:      addressGroupRef.GetName(),
 		Namespace: addressGroupNamespace,
 	}
-	if err := v.Client.Get(ctx, addressGroupPortMappingKey, addressGroupPortMapping); err != nil {
+	if err := v.Client.Get(ctx, addressGroupKey, addressGroup); err != nil {
 		return nil, fmt.Errorf("addressGroup %s not found in namespace %s: %w",
 			addressGroupRef.GetName(),
 			addressGroupNamespace,
 			err)
 	}
+
+	// For backward compatibility, also check if AddressGroupPortMapping exists
+	addressGroupPortMapping := &netguardv1alpha1.AddressGroupPortMapping{}
+	addressGroupPortMappingKey := client.ObjectKey{
+		Name:      addressGroupRef.GetName(),
+		Namespace: addressGroupNamespace,
+	}
+	_ = v.Client.Get(ctx, addressGroupPortMappingKey, addressGroupPortMapping)
 
 	// 1.2 Check that onRef (ServiceRef) exists
 	serviceRef := policy.Spec.ServiceRef
@@ -207,17 +217,26 @@ func (v *AddressGroupBindingPolicyCustomValidator) ValidateUpdate(ctx context.Co
 		return nil, fmt.Errorf("policy must be in the same namespace as the referenced address group")
 	}
 
-	addressGroupPortMapping := &netguardv1alpha1.AddressGroupPortMapping{}
-	addressGroupPortMappingKey := client.ObjectKey{
+	// Check if AddressGroup exists directly
+	addressGroup := &providerv1alpha1.AddressGroup{}
+	addressGroupKey := client.ObjectKey{
 		Name:      addressGroupRef.GetName(),
 		Namespace: addressGroupNamespace,
 	}
-	if err := v.Client.Get(ctx, addressGroupPortMappingKey, addressGroupPortMapping); err != nil {
+	if err := v.Client.Get(ctx, addressGroupKey, addressGroup); err != nil {
 		return nil, fmt.Errorf("addressGroup %s not found in namespace %s: %w",
 			addressGroupRef.GetName(),
 			addressGroupNamespace,
 			err)
 	}
+
+	// For backward compatibility, also check if AddressGroupPortMapping exists
+	addressGroupPortMapping := &netguardv1alpha1.AddressGroupPortMapping{}
+	addressGroupPortMappingKey := client.ObjectKey{
+		Name:      addressGroupRef.GetName(),
+		Namespace: addressGroupNamespace,
+	}
+	_ = v.Client.Get(ctx, addressGroupPortMappingKey, addressGroupPortMapping)
 
 	return nil, nil
 }

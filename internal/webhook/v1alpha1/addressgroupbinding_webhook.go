@@ -28,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	netguardv1alpha1 "sgroups.io/netguard/api/v1alpha1"
+	providerv1alpha1 "sgroups.io/netguard/deps/apis/sgroups-k8s-provider/v1alpha1"
 )
 
 // nolint:unused
@@ -97,23 +98,40 @@ func (v *AddressGroupBindingCustomValidator) ValidateCreate(ctx context.Context,
 		return nil, fmt.Errorf("addressGroupRef must be to a resource with APIVersion netguard.sgroups.io/v1alpha1, got %s", addressGroupRef.GetAPIVersion())
 	}
 
-	// 1.2 Check if AddressGroupPortMapping exists
+	// 1.2 Check if AddressGroup exists directly
+	addressGroupNamespace := ResolveNamespace(addressGroupRef.GetNamespace(), binding.GetNamespace())
+	addressGroup := &providerv1alpha1.AddressGroup{}
+	addressGroupKey := client.ObjectKey{
+		Name:      addressGroupRef.GetName(),
+		Namespace: addressGroupNamespace,
+	}
+	if err := v.Client.Get(ctx, addressGroupKey, addressGroup); err != nil {
+		return nil, fmt.Errorf("addressGroup %s not found in namespace %s: %w",
+			addressGroupRef.GetName(),
+			addressGroupNamespace,
+			err)
+	}
+
+	// 1.3 Get AddressGroupPortMapping for port information
 	portMapping := &netguardv1alpha1.AddressGroupPortMapping{}
 	portMappingKey := client.ObjectKey{
 		Name:      addressGroupRef.GetName(), // Port mapping has the same name as the address group
-		Namespace: ResolveNamespace(addressGroupRef.GetNamespace(), binding.GetNamespace()),
+		Namespace: addressGroupNamespace,
 	}
 	if err := v.Client.Get(ctx, portMappingKey, portMapping); err != nil {
-		return nil, fmt.Errorf("addressGroupPortMapping for addressGroup %s not found: %w", addressGroupRef.GetName(), err)
+		// If port mapping doesn't exist, we can't check port overlaps
+		// This is not a critical error as the port mapping might be created later
+		addressgroupbindinglog.Info("AddressGroupPortMapping not found, skipping port overlap check",
+			"addressGroup", addressGroupRef.GetName(),
+			"namespace", addressGroupNamespace)
+	} else {
+		// 1.4 Check for port overlaps if port mapping exists
+		if err := CheckPortOverlaps(service, portMapping); err != nil {
+			return nil, err
+		}
 	}
 
-	// 1.3 Check for port overlaps
-	if err := CheckPortOverlaps(service, portMapping); err != nil {
-		return nil, err
-	}
-
-	// 1.4 Check cross-namespace policy rule
-	addressGroupNamespace := ResolveNamespace(addressGroupRef.GetNamespace(), binding.GetNamespace())
+	// 1.5 Check cross-namespace policy rule
 
 	// If the address group is in a different namespace than the binding/service
 	if addressGroupNamespace != binding.GetNamespace() {
@@ -189,24 +207,41 @@ func (v *AddressGroupBindingCustomValidator) ValidateUpdate(ctx context.Context,
 		return nil, fmt.Errorf("service %s not found: %w", serviceRef.GetName(), err)
 	}
 
-	// 1.2 Check if AddressGroupPortMapping exists
+	// 1.2 Check if AddressGroup exists directly
 	addressGroupRef := newBinding.Spec.AddressGroupRef
+	addressGroupNamespace := ResolveNamespace(addressGroupRef.GetNamespace(), newBinding.GetNamespace())
+	addressGroup := &providerv1alpha1.AddressGroup{}
+	addressGroupKey := client.ObjectKey{
+		Name:      addressGroupRef.GetName(),
+		Namespace: addressGroupNamespace,
+	}
+	if err := v.Client.Get(ctx, addressGroupKey, addressGroup); err != nil {
+		return nil, fmt.Errorf("addressGroup %s not found in namespace %s: %w",
+			addressGroupRef.GetName(),
+			addressGroupNamespace,
+			err)
+	}
+
+	// 1.3 Get AddressGroupPortMapping for port information
 	portMapping := &netguardv1alpha1.AddressGroupPortMapping{}
 	portMappingKey := client.ObjectKey{
-		Name:      addressGroupRef.GetName(),
-		Namespace: ResolveNamespace(addressGroupRef.GetNamespace(), newBinding.GetNamespace()),
+		Name:      addressGroupRef.GetName(), // Port mapping has the same name as the address group
+		Namespace: addressGroupNamespace,
 	}
 	if err := v.Client.Get(ctx, portMappingKey, portMapping); err != nil {
-		return nil, fmt.Errorf("addressGroupPortMapping for addressGroup %s not found: %w", addressGroupRef.GetName(), err)
+		// If port mapping doesn't exist, we can't check port overlaps
+		// This is not a critical error as the port mapping might be created later
+		addressgroupbindinglog.Info("AddressGroupPortMapping not found, skipping port overlap check",
+			"addressGroup", addressGroupRef.GetName(),
+			"namespace", addressGroupNamespace)
+	} else {
+		// 1.4 Check for port overlaps if port mapping exists
+		if err := CheckPortOverlaps(service, portMapping); err != nil {
+			return nil, err
+		}
 	}
 
-	// 1.3 Check for port overlaps
-	if err := CheckPortOverlaps(service, portMapping); err != nil {
-		return nil, err
-	}
-
-	// 1.4 Check cross-namespace policy rule
-	addressGroupNamespace := ResolveNamespace(addressGroupRef.GetNamespace(), newBinding.GetNamespace())
+	// 1.5 Check cross-namespace policy rule
 
 	// If the address group is in a different namespace than the binding/service
 	if addressGroupNamespace != newBinding.GetNamespace() {
