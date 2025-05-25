@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"strings"
 	"time"
@@ -33,6 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	netguardv1alpha1 "sgroups.io/netguard/api/v1alpha1"
+	providerv1alpha1 "sgroups.io/netguard/deps/apis/sgroups-k8s-provider/v1alpha1"
 )
 
 // RuleS2SReconciler reconciles a RuleS2S object
@@ -210,12 +212,13 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	// Determine which ports to use based on traffic direction
+	// In both cases, we use ports from the service that receives the traffic
 	var ports []netguardv1alpha1.IngressPort
 	if ruleS2S.Spec.Traffic == "ingress" {
-		// For ingress, use ports from the local service (receiver)
+		// For ingress, local service is the receiver
 		ports = localService.Spec.IngressPorts
 	} else {
-		// For egress, use ports from the target service (receiver)
+		// For egress, target service is the receiver
 		ports = targetService.Spec.IngressPorts
 	}
 
@@ -310,7 +313,6 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 }
 
 // createOrUpdateIEAgAgRule creates or updates an IEAgAgRule
-// This is a placeholder implementation that will be updated when we have more information about the provider API
 func (r *RuleS2SReconciler) createOrUpdateIEAgAgRule(
 	ctx context.Context,
 	ruleS2S *netguardv1alpha1.RuleS2S,
@@ -329,20 +331,112 @@ func (r *RuleS2SReconciler) createOrUpdateIEAgAgRule(
 		ruleNamespace = targetAG.ResolveNamespace(targetAG.GetNamespace())
 	}
 
-	// Create rule name
-	ruleName := fmt.Sprintf("%s-%s-%s-%s",
-		strings.ToLower(ruleS2S.Spec.Traffic),
+	// Generate rule name using the helper function
+	ruleName := r.generateRuleName(
+		ruleS2S.Name,
+		ruleS2S.Spec.Traffic,
 		localAG.Name,
 		targetAG.Name,
-		strings.ToLower(string(protocol)))
+		string(protocol))
 
-	// TODO: Create or update the IEAgAgRule resource
-	// This is a placeholder implementation that will be updated when we have more information about the provider API
+	// Create the rule
+	ieAgAgRule := &providerv1alpha1.IEAgAgRule{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      ruleName,
+			Namespace: ruleNamespace,
+			OwnerReferences: []metav1.OwnerReference{
+				*metav1.NewControllerRef(ruleS2S, netguardv1alpha1.GroupVersion.WithKind("RuleS2S")),
+			},
+		},
+		Spec: providerv1alpha1.IEAgAgRuleSpec{
+			Transport: providerv1alpha1.TransportProtocol(string(protocol)),
+			Traffic:   providerv1alpha1.TrafficDirection(strings.ToUpper(ruleS2S.Spec.Traffic)),
+			AddressGroupLocal: providerv1alpha1.NamespacedObjectReference{
+				ObjectReference: providerv1alpha1.ObjectReference{
+					APIVersion: localAG.APIVersion,
+					Kind:       localAG.Kind,
+					Name:       localAG.Name,
+				},
+				Namespace: localAG.ResolveNamespace(localAG.GetNamespace()),
+			},
+			AddressGroup: providerv1alpha1.NamespacedObjectReference{
+				ObjectReference: providerv1alpha1.ObjectReference{
+					APIVersion: targetAG.APIVersion,
+					Kind:       targetAG.Kind,
+					Name:       targetAG.Name,
+				},
+				Namespace: targetAG.ResolveNamespace(targetAG.GetNamespace()),
+			},
+			Ports: []providerv1alpha1.AccPorts{
+				{
+					D: portsStr,
+				},
+			},
+			Action: providerv1alpha1.ActionAccept,
+			Logs:   true,
+			Priority: &providerv1alpha1.RulePrioritySpec{
+				Value: 100,
+			},
+		},
+	}
 
-	// Log the namespace where the rule would be created
-	r.Log.Info("Would create IEAgAgRule", "namespace", ruleNamespace, "name", ruleName)
+	// Check if the rule already exists
+	existingRule := &providerv1alpha1.IEAgAgRule{}
+	err := r.Get(ctx, types.NamespacedName{
+		Namespace: ruleNamespace,
+		Name:      ruleName,
+	}, existingRule)
+
+	if err != nil && errors.IsNotFound(err) {
+		// Rule doesn't exist, create it
+		r.Log.Info("Creating new IEAgAgRule", "namespace", ruleNamespace, "name", ruleName)
+		if err := r.Create(ctx, ieAgAgRule); err != nil {
+			return "", err
+		}
+		return ruleName, nil
+	} else if err != nil {
+		// Error getting the rule
+		return "", err
+	}
+
+	// Rule exists, update it
+	r.Log.Info("Updating existing IEAgAgRule", "namespace", ruleNamespace, "name", ruleName)
+	existingRule.Spec = ieAgAgRule.Spec
+	if err := r.Update(ctx, existingRule); err != nil {
+		return "", err
+	}
 
 	return ruleName, nil
+}
+
+// generateRuleName creates a deterministic rule name based on input parameters
+func (r *RuleS2SReconciler) generateRuleName(
+	ruleName string,
+	trafficDirection string,
+	localAGName string,
+	targetAGName string,
+	protocol string,
+) string {
+	// Generate deterministic UUID based on input parameters
+	input := fmt.Sprintf("%s-%s-%s-%s-%s",
+		ruleName,
+		strings.ToLower(trafficDirection),
+		localAGName,
+		targetAGName,
+		strings.ToLower(protocol))
+
+	h := sha256.New()
+	h.Write([]byte(input))
+	hash := h.Sum(nil)
+
+	// Format first 16 bytes as UUID v5 (8-4-4-4-12 format)
+	uuid := fmt.Sprintf("%x-%x-%x-%x-%x",
+		hash[0:4], hash[4:6], hash[6:8], hash[8:10], hash[10:16])
+
+	// Use traffic direction prefix and UUID
+	return fmt.Sprintf("%s-%s",
+		strings.ToLower(trafficDirection)[:3],
+		uuid)
 }
 
 // SetupWithManager sets up the controller with the Manager.

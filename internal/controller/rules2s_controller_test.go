@@ -31,6 +31,78 @@ import (
 )
 
 var _ = Describe("RuleS2S Controller", func() {
+	Context("When generating rule names", func() {
+		It("should generate consistent names for the same input", func() {
+			reconciler := &RuleS2SReconciler{}
+
+			// Generate name twice with the same input
+			name1 := reconciler.generateRuleName("test-rule", "ingress", "local-ag", "target-ag", "TCP")
+			name2 := reconciler.generateRuleName("test-rule", "ingress", "local-ag", "target-ag", "TCP")
+
+			// Names should be identical
+			Expect(name1).To(Equal(name2))
+		})
+
+		It("should handle different traffic directions", func() {
+			reconciler := &RuleS2SReconciler{}
+
+			// Generate names for ingress and egress
+			ingressName := reconciler.generateRuleName("test-rule", "ingress", "local-ag", "target-ag", "TCP")
+			egressName := reconciler.generateRuleName("test-rule", "egress", "local-ag", "target-ag", "TCP")
+
+			// Names should be different
+			Expect(ingressName).NotTo(Equal(egressName))
+
+			// Ingress name should start with "ing-"
+			Expect(ingressName).To(HavePrefix("ing-"))
+
+			// Egress name should start with "egr-"
+			Expect(egressName).To(HavePrefix("egr-"))
+		})
+
+		It("should handle different protocols", func() {
+			reconciler := &RuleS2SReconciler{}
+
+			// Generate names for TCP and UDP
+			tcpName := reconciler.generateRuleName("test-rule", "ingress", "local-ag", "target-ag", "TCP")
+			udpName := reconciler.generateRuleName("test-rule", "ingress", "local-ag", "target-ag", "UDP")
+
+			// Names should be different
+			Expect(tcpName).NotTo(Equal(udpName))
+		})
+
+		It("should handle very long address group names", func() {
+			reconciler := &RuleS2SReconciler{}
+
+			// Create very long address group names (over 63 characters)
+			longLocalAGName := "very-long-local-address-group-name-that-exceeds-kubernetes-name-limit"
+			longTargetAGName := "very-long-target-address-group-name-that-exceeds-kubernetes-name-limit"
+
+			// Generate name with long address group names
+			name := reconciler.generateRuleName("test-rule", "ingress", longLocalAGName, longTargetAGName, "TCP")
+
+			// Name should be 63 characters or less (Kubernetes name limit)
+			Expect(len(name)).To(BeNumerically("<=", 63))
+		})
+
+		It("should generate different names for different inputs", func() {
+			reconciler := &RuleS2SReconciler{}
+
+			// Generate names with different inputs
+			name1 := reconciler.generateRuleName("rule1", "ingress", "local-ag", "target-ag", "TCP")
+			name2 := reconciler.generateRuleName("rule2", "ingress", "local-ag", "target-ag", "TCP")
+			name3 := reconciler.generateRuleName("rule1", "ingress", "different-local-ag", "target-ag", "TCP")
+			name4 := reconciler.generateRuleName("rule1", "ingress", "local-ag", "different-target-ag", "TCP")
+
+			// All names should be different
+			Expect(name1).NotTo(Equal(name2))
+			Expect(name1).NotTo(Equal(name3))
+			Expect(name1).NotTo(Equal(name4))
+			Expect(name2).NotTo(Equal(name3))
+			Expect(name2).NotTo(Equal(name4))
+			Expect(name3).NotTo(Equal(name4))
+		})
+	})
 	Context("When reconciling a resource", func() {
 		const resourceName = "test-resource"
 

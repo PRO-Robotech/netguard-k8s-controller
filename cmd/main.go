@@ -38,6 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	netguardv1alpha1 "sgroups.io/netguard/api/v1alpha1"
+	providerv1alpha1 "sgroups.io/netguard/deps/apis/sgroups-k8s-provider/v1alpha1"
 	"sgroups.io/netguard/internal/controller"
 	webhooknetguardv1alpha1 "sgroups.io/netguard/internal/webhook/v1alpha1"
 	// +kubebuilder:scaffold:imports
@@ -52,6 +53,7 @@ func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
 	utilruntime.Must(netguardv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(providerv1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 
