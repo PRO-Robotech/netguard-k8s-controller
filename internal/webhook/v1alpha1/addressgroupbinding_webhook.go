@@ -94,8 +94,8 @@ func (v *AddressGroupBindingCustomValidator) ValidateCreate(ctx context.Context,
 	if addressGroupRef.GetKind() != "AddressGroup" {
 		return nil, fmt.Errorf("addressGroupRef must be to an AddressGroup resource, got %s", addressGroupRef.GetKind())
 	}
-	if addressGroupRef.GetAPIVersion() != "netguard.sgroups.io/v1alpha1" {
-		return nil, fmt.Errorf("addressGroupRef must be to a resource with APIVersion netguard.sgroups.io/v1alpha1, got %s", addressGroupRef.GetAPIVersion())
+	if addressGroupRef.GetAPIVersion() != "provider.sgroups.io/v1alpha1" {
+		return nil, fmt.Errorf("addressGroupRef must be to a resource with APIVersion provider.sgroups.io/v1alpha1, got %s", addressGroupRef.GetAPIVersion())
 	}
 
 	// 1.2 Check if AddressGroup exists directly
