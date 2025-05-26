@@ -16,8 +16,6 @@ require (
 	sigs.k8s.io/controller-runtime v0.20.0
 )
 
-replace sgroups.io/netguard/deps/apis/sgroups-k8s-provider => ./deps/apis/sgroups-k8s-provider
-
 require (
 	cel.dev/expr v0.18.0 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.0 // indirect
