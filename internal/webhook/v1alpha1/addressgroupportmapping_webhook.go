@@ -101,11 +101,6 @@ func (v *AddressGroupPortMappingCustomValidator) ValidateUpdate(ctx context.Cont
 		return nil, fmt.Errorf("spec of AddressGroupPortMapping cannot be changed")
 	}
 
-	// Check that accessPorts hasn't changed
-	if !reflect.DeepEqual(oldPortMapping.AccessPorts, newPortMapping.AccessPorts) {
-		return nil, fmt.Errorf("accessPorts of AddressGroupPortMapping cannot be changed")
-	}
-
 	// Check for internal port overlaps
 	if err := v.checkInternalPortOverlaps(newPortMapping); err != nil {
 		return nil, err
