@@ -52,9 +52,6 @@ spec:
                   name:
                     description: Name of the referenced object
                     type: string
-                  namespace:
-                    description: Namespace of the referenced object
-                    type: string
                 required:
                 - apiVersion
                 - kind

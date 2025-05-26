@@ -22,10 +22,10 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	netguardv1alpha1 "sgroups.io/netguard/api/v1alpha1"
 )
@@ -143,6 +143,7 @@ var _ = Describe("RuleS2S Controller", func() {
 			controllerReconciler := &RuleS2SReconciler{
 				Client: k8sClient,
 				Scheme: k8sClient.Scheme(),
+				Log:    ctrl.Log.WithName("controllers").WithName("RuleS2S"),
 			}
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{

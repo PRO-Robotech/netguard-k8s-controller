@@ -33,6 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	netguardv1alpha1 "sgroups.io/netguard/api/v1alpha1"
+	providerv1alpha1 "sgroups.io/netguard/deps/apis/sgroups-k8s-provider/v1alpha1"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -60,6 +61,10 @@ var _ = BeforeSuite(func() {
 
 	var err error
 	err = netguardv1alpha1.AddToScheme(scheme.Scheme)
+	Expect(err).NotTo(HaveOccurred())
+
+	// Add provider scheme
+	err = providerv1alpha1.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
 
 	// +kubebuilder:scaffold:scheme

@@ -32,6 +32,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	netguardv1alpha1 "sgroups.io/netguard/api/v1alpha1"
 	providerv1alpha1 "sgroups.io/netguard/deps/apis/sgroups-k8s-provider/v1alpha1"
@@ -56,8 +57,8 @@ type RuleS2SReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.20.0/pkg/reconcile
 func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := r.Log.WithValues("rules2s", req.NamespacedName)
-	log.Info("Reconciling RuleS2S")
+	log := log.FromContext(ctx)
+	log.Info("Reconciling RuleS2S", "request", req)
 
 	// Fetch the RuleS2S instance
 	ruleS2S := &netguardv1alpha1.RuleS2S{}
@@ -90,7 +91,7 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			Reason:  "ServiceAliasNotFound",
 			Message: fmt.Sprintf("Local service alias not found: %v", err),
 		})
-		if err := r.Status().Update(ctx, ruleS2S); err != nil {
+		if err := UpdateStatusWithRetry(ctx, r.Client, ruleS2S, DefaultMaxRetries); err != nil {
 			log.Error(err, "Failed to update RuleS2S status")
 		}
 		return ctrl.Result{RequeueAfter: time.Minute}, err
@@ -109,7 +110,7 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			Reason:  "ServiceAliasNotFound",
 			Message: fmt.Sprintf("Target service alias not found: %v", err),
 		})
-		if err := r.Status().Update(ctx, ruleS2S); err != nil {
+		if err := UpdateStatusWithRetry(ctx, r.Client, ruleS2S, DefaultMaxRetries); err != nil {
 			log.Error(err, "Failed to update RuleS2S status")
 		}
 		return ctrl.Result{RequeueAfter: time.Minute}, err
@@ -129,7 +130,7 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			Reason:  "ServiceNotFound",
 			Message: fmt.Sprintf("Local service not found: %v", err),
 		})
-		if err := r.Status().Update(ctx, ruleS2S); err != nil {
+		if err := UpdateStatusWithRetry(ctx, r.Client, ruleS2S, DefaultMaxRetries); err != nil {
 			log.Error(err, "Failed to update RuleS2S status")
 		}
 		return ctrl.Result{RequeueAfter: time.Minute}, err
@@ -148,7 +149,7 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			Reason:  "ServiceNotFound",
 			Message: fmt.Sprintf("Target service not found: %v", err),
 		})
-		if err := r.Status().Update(ctx, ruleS2S); err != nil {
+		if err := UpdateStatusWithRetry(ctx, r.Client, ruleS2S, DefaultMaxRetries); err != nil {
 			log.Error(err, "Failed to update RuleS2S status")
 		}
 		return ctrl.Result{RequeueAfter: time.Minute}, err
@@ -205,7 +206,7 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			Reason:  "NoAddressGroups",
 			Message: "One or both services have no address groups",
 		})
-		if err := r.Status().Update(ctx, ruleS2S); err != nil {
+		if err := UpdateStatusWithRetry(ctx, r.Client, ruleS2S, DefaultMaxRetries); err != nil {
 			log.Error(err, "Failed to update RuleS2S status")
 		}
 		return ctrl.Result{RequeueAfter: time.Minute}, fmt.Errorf("one or both services have no address groups")
@@ -230,7 +231,7 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			Reason:  "NoPorts",
 			Message: "No ports defined for the service",
 		})
-		if err := r.Status().Update(ctx, ruleS2S); err != nil {
+		if err := UpdateStatusWithRetry(ctx, r.Client, ruleS2S, DefaultMaxRetries); err != nil {
 			log.Error(err, "Failed to update RuleS2S status")
 		}
 		return ctrl.Result{RequeueAfter: time.Minute}, fmt.Errorf("no ports defined for the service")
@@ -292,7 +293,7 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			Reason:  "RulesCreated",
 			Message: fmt.Sprintf("Created rules: %s", strings.Join(createdRules, ", ")),
 		})
-		if err := r.Status().Update(ctx, ruleS2S); err != nil {
+		if err := UpdateStatusWithRetry(ctx, r.Client, ruleS2S, DefaultMaxRetries); err != nil {
 			log.Error(err, "Failed to update RuleS2S status")
 			return ctrl.Result{}, err
 		}
@@ -303,7 +304,7 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			Reason:  "NoRulesCreated",
 			Message: "Failed to create any rules",
 		})
-		if err := r.Status().Update(ctx, ruleS2S); err != nil {
+		if err := UpdateStatusWithRetry(ctx, r.Client, ruleS2S, DefaultMaxRetries); err != nil {
 			log.Error(err, "Failed to update RuleS2S status")
 		}
 		return ctrl.Result{RequeueAfter: time.Minute}, fmt.Errorf("failed to create any rules")
@@ -339,44 +340,35 @@ func (r *RuleS2SReconciler) createOrUpdateIEAgAgRule(
 		targetAG.Name,
 		string(protocol))
 
-	// Create the rule
-	ieAgAgRule := &providerv1alpha1.IEAgAgRule{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      ruleName,
-			Namespace: ruleNamespace,
-			OwnerReferences: []metav1.OwnerReference{
-				*metav1.NewControllerRef(ruleS2S, netguardv1alpha1.GroupVersion.WithKind("RuleS2S")),
+	// Define the rule spec
+	ruleSpec := providerv1alpha1.IEAgAgRuleSpec{
+		Transport: providerv1alpha1.TransportProtocol(string(protocol)),
+		Traffic:   providerv1alpha1.TrafficDirection(strings.ToUpper(ruleS2S.Spec.Traffic)),
+		AddressGroupLocal: providerv1alpha1.NamespacedObjectReference{
+			ObjectReference: providerv1alpha1.ObjectReference{
+				APIVersion: localAG.APIVersion,
+				Kind:       localAG.Kind,
+				Name:       localAG.Name,
+			},
+			Namespace: localAG.ResolveNamespace(localAG.GetNamespace()),
+		},
+		AddressGroup: providerv1alpha1.NamespacedObjectReference{
+			ObjectReference: providerv1alpha1.ObjectReference{
+				APIVersion: targetAG.APIVersion,
+				Kind:       targetAG.Kind,
+				Name:       targetAG.Name,
+			},
+			Namespace: targetAG.ResolveNamespace(targetAG.GetNamespace()),
+		},
+		Ports: []providerv1alpha1.AccPorts{
+			{
+				D: portsStr,
 			},
 		},
-		Spec: providerv1alpha1.IEAgAgRuleSpec{
-			Transport: providerv1alpha1.TransportProtocol(string(protocol)),
-			Traffic:   providerv1alpha1.TrafficDirection(strings.ToUpper(ruleS2S.Spec.Traffic)),
-			AddressGroupLocal: providerv1alpha1.NamespacedObjectReference{
-				ObjectReference: providerv1alpha1.ObjectReference{
-					APIVersion: localAG.APIVersion,
-					Kind:       localAG.Kind,
-					Name:       localAG.Name,
-				},
-				Namespace: localAG.ResolveNamespace(localAG.GetNamespace()),
-			},
-			AddressGroup: providerv1alpha1.NamespacedObjectReference{
-				ObjectReference: providerv1alpha1.ObjectReference{
-					APIVersion: targetAG.APIVersion,
-					Kind:       targetAG.Kind,
-					Name:       targetAG.Name,
-				},
-				Namespace: targetAG.ResolveNamespace(targetAG.GetNamespace()),
-			},
-			Ports: []providerv1alpha1.AccPorts{
-				{
-					D: portsStr,
-				},
-			},
-			Action: providerv1alpha1.ActionAccept,
-			Logs:   true,
-			Priority: &providerv1alpha1.RulePrioritySpec{
-				Value: 100,
-			},
+		Action: providerv1alpha1.ActionAccept,
+		Logs:   true,
+		Priority: &providerv1alpha1.RulePrioritySpec{
+			Value: 100,
 		},
 	}
 
@@ -388,21 +380,77 @@ func (r *RuleS2SReconciler) createOrUpdateIEAgAgRule(
 	}, existingRule)
 
 	if err != nil && errors.IsNotFound(err) {
-		// Rule doesn't exist, create it
+		// Rule doesn't exist, create it with retry
 		r.Log.Info("Creating new IEAgAgRule", "namespace", ruleNamespace, "name", ruleName)
-		if err := r.Create(ctx, ieAgAgRule); err != nil {
-			return "", err
+
+		// Create the rule
+		newRule := &providerv1alpha1.IEAgAgRule{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      ruleName,
+				Namespace: ruleNamespace,
+				OwnerReferences: []metav1.OwnerReference{
+					*metav1.NewControllerRef(ruleS2S, netguardv1alpha1.GroupVersion.WithKind("RuleS2S")),
+				},
+			},
+			Spec: ruleSpec,
 		}
-		return ruleName, nil
+
+		// Try to create with retries
+		for i := 0; i < DefaultMaxRetries; i++ {
+			if err := r.Create(ctx, newRule); err != nil {
+				if errors.IsAlreadyExists(err) {
+					// Rule was created concurrently, get it and update
+					if err := r.Get(ctx, types.NamespacedName{
+						Namespace: ruleNamespace,
+						Name:      ruleName,
+					}, existingRule); err != nil {
+						if errors.IsNotFound(err) {
+							// Strange situation, try again
+							continue
+						}
+						return "", err
+					}
+					// Found the rule, break out to update it
+					break
+				} else if errors.IsConflict(err) {
+					// Conflict, wait and retry
+					time.Sleep(DefaultRetryInterval)
+					continue
+				} else {
+					// Other error
+					return "", err
+				}
+			} else {
+				// Successfully created
+				return ruleName, nil
+			}
+		}
 	} else if err != nil {
 		// Error getting the rule
 		return "", err
 	}
 
-	// Rule exists, update it
+	// Rule exists, update it using patch with retry
 	r.Log.Info("Updating existing IEAgAgRule", "namespace", ruleNamespace, "name", ruleName)
-	existingRule.Spec = ieAgAgRule.Spec
-	if err := r.Update(ctx, existingRule); err != nil {
+
+	// Get the latest version of the rule to avoid conflicts
+	latestRule := &providerv1alpha1.IEAgAgRule{}
+	if err := r.Get(ctx, types.NamespacedName{
+		Namespace: ruleNamespace,
+		Name:      ruleName,
+	}, latestRule); err != nil {
+		return "", err
+	}
+
+	// Create a copy for patching
+	original := latestRule.DeepCopy()
+
+	// Update the spec
+	latestRule.Spec = ruleSpec
+
+	// Apply patch with retry
+	patch := client.MergeFrom(original)
+	if err := PatchWithRetry(ctx, r.Client, latestRule, patch, DefaultMaxRetries); err != nil {
 		return "", err
 	}
 

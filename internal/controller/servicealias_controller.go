@@ -22,8 +22,10 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	netguardv1alpha1 "sgroups.io/netguard/api/v1alpha1"
@@ -44,6 +46,45 @@ type ServiceAliasReconciler struct {
 // move the current state of the cluster closer to the desired state.
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.20.0/pkg/reconcile
+// reconcileDelete handles the deletion of a ServiceAlias
+func (r *ServiceAliasReconciler) reconcileDelete(ctx context.Context, serviceAlias *netguardv1alpha1.ServiceAlias, finalizer string) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	logger.Info("Deleting ServiceAlias", "name", serviceAlias.Name)
+
+	// Get the latest version of the resource to avoid conflicts
+	freshServiceAlias := &netguardv1alpha1.ServiceAlias{}
+	if err := r.Get(ctx, types.NamespacedName{
+		Name:      serviceAlias.Name,
+		Namespace: serviceAlias.Namespace,
+	}, freshServiceAlias); err != nil {
+		if apierrors.IsNotFound(err) {
+			// Resource is already gone, nothing to do
+			return ctrl.Result{}, nil
+		}
+		logger.Error(err, "Failed to get latest version of ServiceAlias")
+		return ctrl.Result{}, err
+	}
+
+	// Check if finalizer exists
+	if !controllerutil.ContainsFinalizer(freshServiceAlias, finalizer) {
+		// Finalizer already removed, nothing to do
+		return ctrl.Result{}, nil
+	}
+
+	// Create a patch for removing the finalizer
+	patch := client.MergeFrom(freshServiceAlias.DeepCopy())
+	controllerutil.RemoveFinalizer(freshServiceAlias, finalizer)
+
+	// Apply the patch with retry
+	if err := PatchWithRetry(ctx, r.Client, freshServiceAlias, patch, DefaultMaxRetries); err != nil {
+		logger.Error(err, "Failed to remove finalizer from ServiceAlias")
+		return ctrl.Result{}, err
+	}
+
+	logger.Info("ServiceAlias deleted successfully")
+	return ctrl.Result{}, nil
+}
+
 func (r *ServiceAliasReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	logger.Info("Reconciling ServiceAlias", "request", req)
@@ -60,18 +101,30 @@ func (r *ServiceAliasReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 
+	// Add finalizer if it doesn't exist
+	const finalizer = "servicealias.netguard.sgroups.io/finalizer"
+	if err := EnsureFinalizer(ctx, r.Client, serviceAlias, finalizer); err != nil {
+		logger.Error(err, "Failed to add finalizer to ServiceAlias")
+		return ctrl.Result{}, err
+	}
+
+	// Check if the resource is being deleted
+	if !serviceAlias.DeletionTimestamp.IsZero() {
+		return r.reconcileDelete(ctx, serviceAlias, finalizer)
+	}
+
 	// Check if the referenced Service exists
 	service := &netguardv1alpha1.Service{}
 	err := r.Get(ctx, client.ObjectKey{
 		Name:      serviceAlias.Spec.ServiceRef.GetName(),
-		Namespace: serviceAlias.Spec.ServiceRef.ResolveNamespace(serviceAlias.GetNamespace()),
+		Namespace: serviceAlias.GetNamespace(), // ServiceAlias can only reference Service in the same namespace
 	}, service)
 
 	if apierrors.IsNotFound(err) {
 		// Referenced Service doesn't exist
-		setServiceAliasCondition(serviceAlias, netguardv1alpha1.ConditionReady, metav1.ConditionFalse,
+		SetCondition(&serviceAlias.Status.Conditions, netguardv1alpha1.ConditionReady, metav1.ConditionFalse,
 			"ServiceNotFound", "Referenced Service does not exist")
-		if err := r.Status().Update(ctx, serviceAlias); err != nil {
+		if err := UpdateStatusWithRetry(ctx, r.Client, serviceAlias, DefaultMaxRetries); err != nil {
 			logger.Error(err, "Failed to update status")
 			return ctrl.Result{}, err
 		}
@@ -89,9 +142,9 @@ func (r *ServiceAliasReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	// Service exists, set Ready condition to true
-	setServiceAliasCondition(serviceAlias, netguardv1alpha1.ConditionReady, metav1.ConditionTrue,
+	SetCondition(&serviceAlias.Status.Conditions, netguardv1alpha1.ConditionReady, metav1.ConditionTrue,
 		"ServiceAliasValid", "Referenced Service exists")
-	if err := r.Status().Update(ctx, serviceAlias); err != nil {
+	if err := UpdateStatusWithRetry(ctx, r.Client, serviceAlias, DefaultMaxRetries); err != nil {
 		logger.Error(err, "Failed to update status")
 		return ctrl.Result{}, err
 	}
@@ -102,51 +155,64 @@ func (r *ServiceAliasReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 // setOwnerReference sets the owner reference of the ServiceAlias to the Service
 func (r *ServiceAliasReconciler) setOwnerReference(ctx context.Context, serviceAlias *netguardv1alpha1.ServiceAlias, service *netguardv1alpha1.Service) error {
+	logger := log.FromContext(ctx)
+
+	// Get the latest version of the ServiceAlias to avoid conflicts
+	freshServiceAlias := &netguardv1alpha1.ServiceAlias{}
+	if err := r.Get(ctx, types.NamespacedName{
+		Name:      serviceAlias.Name,
+		Namespace: serviceAlias.Namespace,
+	}, freshServiceAlias); err != nil {
+		return err
+	}
+
 	// Check if owner reference already exists
-	for _, ownerRef := range serviceAlias.GetOwnerReferences() {
+	for _, ownerRef := range freshServiceAlias.GetOwnerReferences() {
 		if ownerRef.UID == service.GetUID() {
 			// Owner reference already exists
 			return nil
 		}
 	}
 
-	// Set owner reference
-	if err := ctrl.SetControllerReference(service, serviceAlias, r.Scheme); err != nil {
+	// Create a copy for patching
+	original := freshServiceAlias.DeepCopy()
+
+	// Set controller reference (will handle deletion automatically)
+	if err := ctrl.SetControllerReference(service, freshServiceAlias, r.Scheme); err != nil {
 		return err
 	}
 
-	// Update the ServiceAlias
-	return r.Update(ctx, serviceAlias)
-}
+	// Update the ServiceAlias using patch with retry
+	logger.Info("Setting owner reference on ServiceAlias",
+		"serviceAlias", freshServiceAlias.Name,
+		"service", service.Name)
 
-// setServiceAliasCondition updates a condition in the status
-func setServiceAliasCondition(serviceAlias *netguardv1alpha1.ServiceAlias, conditionType string, status metav1.ConditionStatus, reason, message string) {
-	now := metav1.Now()
-	condition := metav1.Condition{
-		Type:               conditionType,
-		Status:             status,
-		Reason:             reason,
-		Message:            message,
-		LastTransitionTime: now,
+	patch := client.MergeFrom(original)
+	if err := PatchWithRetry(ctx, r.Client, freshServiceAlias, patch, DefaultMaxRetries); err != nil {
+		return err
 	}
 
-	// Find and update existing condition or append new one
-	for i, cond := range serviceAlias.Status.Conditions {
-		if cond.Type == conditionType {
-			// Only update if status changed to avoid unnecessary updates
-			if cond.Status != status {
-				serviceAlias.Status.Conditions[i] = condition
-			}
-			return
-		}
-	}
+	// Update our local copy to reflect the changes
+	*serviceAlias = *freshServiceAlias
 
-	// Condition not found, append it
-	serviceAlias.Status.Conditions = append(serviceAlias.Status.Conditions, condition)
+	return nil
 }
+
+// This function has been replaced by the SetCondition utility function
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *ServiceAliasReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	// Add index for faster lookups of ServiceAlias by Service name
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(),
+		&netguardv1alpha1.ServiceAlias{},
+		"spec.serviceRef.name",
+		func(obj client.Object) []string {
+			serviceAlias := obj.(*netguardv1alpha1.ServiceAlias)
+			return []string{serviceAlias.Spec.ServiceRef.Name}
+		}); err != nil {
+		return err
+	}
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&netguardv1alpha1.ServiceAlias{}).
 		Named("servicealias").

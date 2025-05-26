@@ -1,0 +1,1817 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: sgroups-k8s-netguard
+    control-plane: controller-manager
+  name: sgroups-k8s-netguard-system
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.1
+  name: addressgroupbindingpolicies.netguard.sgroups.io
+spec:
+  group: netguard.sgroups.io
+  names:
+    kind: AddressGroupBindingPolicy
+    listKind: AddressGroupBindingPolicyList
+    plural: addressgroupbindingpolicies
+    singular: addressgroupbindingpolicy
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: AddressGroupBindingPolicy is the Schema for the addressgroupbindingpolicies
+          API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: AddressGroupBindingPolicySpec defines the desired state of
+              AddressGroupBindingPolicy.
+            properties:
+              addressGroupRef:
+                description: AddressGroupRef is a reference to the AddressGroup resource
+                properties:
+                  apiVersion:
+                    description: APIVersion of the referenced object
+                    type: string
+                  kind:
+                    description: Kind of the referenced object
+                    type: string
+                  name:
+                    description: Name of the referenced object
+                    type: string
+                  namespace:
+                    description: Namespace of the referenced object
+                    type: string
+                required:
+                - apiVersion
+                - kind
+                - name
+                type: object
+              serviceRef:
+                description: ServiceRef is a reference to the Service resource
+                properties:
+                  apiVersion:
+                    description: APIVersion of the referenced object
+                    type: string
+                  kind:
+                    description: Kind of the referenced object
+                    type: string
+                  name:
+                    description: Name of the referenced object
+                    type: string
+                  namespace:
+                    description: Namespace of the referenced object
+                    type: string
+                required:
+                - apiVersion
+                - kind
+                - name
+                type: object
+            required:
+            - addressGroupRef
+            - serviceRef
+            type: object
+          status:
+            description: AddressGroupBindingPolicyStatus defines the observed state
+              of AddressGroupBindingPolicy.
+            properties:
+              conditions:
+                description: Conditions represent the latest available observations
+                  of the resource's state
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.1
+  name: addressgroupbindings.netguard.sgroups.io
+spec:
+  group: netguard.sgroups.io
+  names:
+    kind: AddressGroupBinding
+    listKind: AddressGroupBindingList
+    plural: addressgroupbindings
+    singular: addressgroupbinding
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: AddressGroupBinding is the Schema for the addressgroupbindings
+          API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: AddressGroupBindingSpec defines the desired state of AddressGroupBinding.
+            properties:
+              addressGroupRef:
+                description: AddressGroupRef is a reference to the AddressGroup resource
+                properties:
+                  apiVersion:
+                    description: APIVersion of the referenced object
+                    type: string
+                  kind:
+                    description: Kind of the referenced object
+                    type: string
+                  name:
+                    description: Name of the referenced object
+                    type: string
+                  namespace:
+                    description: Namespace of the referenced object
+                    type: string
+                required:
+                - apiVersion
+                - kind
+                - name
+                type: object
+              serviceRef:
+                description: ServiceRef is a reference to the Service resource
+                properties:
+                  apiVersion:
+                    description: APIVersion of the referenced object
+                    type: string
+                  kind:
+                    description: Kind of the referenced object
+                    type: string
+                  name:
+                    description: Name of the referenced object
+                    type: string
+                required:
+                - apiVersion
+                - kind
+                - name
+                type: object
+            required:
+            - addressGroupRef
+            - serviceRef
+            type: object
+          status:
+            description: AddressGroupBindingStatus defines the observed state of AddressGroupBinding.
+            properties:
+              conditions:
+                description: Conditions represent the latest available observations
+                  of the resource's state
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.1
+  name: addressgroupportmappings.netguard.sgroups.io
+spec:
+  group: netguard.sgroups.io
+  names:
+    kind: AddressGroupPortMapping
+    listKind: AddressGroupPortMappingList
+    plural: addressgroupportmappings
+    singular: addressgroupportmapping
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: AddressGroupPortMapping is the Schema for the addressgroupportmappings
+          API.
+        properties:
+          accessPorts:
+            description: AccessPortsSpec defines the services and their ports that
+              are allowed access
+            properties:
+              items:
+                description: Items contains the list of service ports references
+                items:
+                  description: ServicePortsRef defines a reference to a Service and
+                    its allowed ports
+                  properties:
+                    apiVersion:
+                      description: APIVersion of the referenced object
+                      type: string
+                    kind:
+                      description: Kind of the referenced object
+                      type: string
+                    name:
+                      description: Name of the referenced object
+                      type: string
+                    namespace:
+                      description: Namespace of the referenced object
+                      type: string
+                    ports:
+                      description: Ports defines the allowed ports by protocol
+                      properties:
+                        TCP:
+                          description: TCP ports
+                          items:
+                            description: PortConfig defines a port or port range configuration
+                            properties:
+                              description:
+                                description: Description of this port configuration
+                                type: string
+                              port:
+                                description: Port or port range (e.g., "80", "8080-9090")
+                                type: string
+                            required:
+                            - port
+                            type: object
+                          type: array
+                        UDP:
+                          description: UDP ports
+                          items:
+                            description: PortConfig defines a port or port range configuration
+                            properties:
+                              description:
+                                description: Description of this port configuration
+                                type: string
+                              port:
+                                description: Port or port range (e.g., "80", "8080-9090")
+                                type: string
+                            required:
+                            - port
+                            type: object
+                          type: array
+                      type: object
+                  required:
+                  - apiVersion
+                  - kind
+                  - name
+                  - ports
+                  type: object
+                type: array
+            type: object
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: AddressGroupPortMappingSpec defines the desired state of
+              AddressGroupPortMapping.
+            type: object
+          status:
+            description: AddressGroupPortMappingStatus defines the observed state
+              of AddressGroupPortMapping.
+            properties:
+              conditions:
+                description: Conditions represent the latest available observations
+                  of the resource's state
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.1
+  name: rules2ses.netguard.sgroups.io
+spec:
+  group: netguard.sgroups.io
+  names:
+    kind: RuleS2S
+    listKind: RuleS2SList
+    plural: rules2ses
+    singular: rules2s
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: RuleS2S is the Schema for the rules2s API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: RuleS2SSpec defines the desired state of RuleS2S.
+            properties:
+              serviceLocalRef:
+                description: ServiceLocalRef is a reference to the local service
+                properties:
+                  apiVersion:
+                    description: APIVersion of the referenced object
+                    type: string
+                  kind:
+                    description: Kind of the referenced object
+                    type: string
+                  name:
+                    description: Name of the referenced object
+                    type: string
+                  namespace:
+                    description: Namespace of the referenced object
+                    type: string
+                required:
+                - apiVersion
+                - kind
+                - name
+                type: object
+              serviceRef:
+                description: ServiceRef is a reference to the target service
+                properties:
+                  apiVersion:
+                    description: APIVersion of the referenced object
+                    type: string
+                  kind:
+                    description: Kind of the referenced object
+                    type: string
+                  name:
+                    description: Name of the referenced object
+                    type: string
+                  namespace:
+                    description: Namespace of the referenced object
+                    type: string
+                required:
+                - apiVersion
+                - kind
+                - name
+                type: object
+              traffic:
+                description: 'Traffic direction: ingress or egress'
+                enum:
+                - ingress
+                - egress
+                type: string
+            required:
+            - serviceLocalRef
+            - serviceRef
+            - traffic
+            type: object
+          status:
+            description: RuleS2SStatus defines the observed state of RuleS2S.
+            properties:
+              conditions:
+                description: Conditions represent the latest available observations
+                  of the resource's state
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.1
+  name: servicealiases.netguard.sgroups.io
+spec:
+  group: netguard.sgroups.io
+  names:
+    kind: ServiceAlias
+    listKind: ServiceAliasList
+    plural: servicealiases
+    singular: servicealias
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: ServiceAlias is the Schema for the servicealias API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: ServiceAliasSpec defines the desired state of ServiceAlias.
+            properties:
+              serviceRef:
+                description: ServiceRef is a reference to the Service resource this
+                  alias points to
+                properties:
+                  apiVersion:
+                    description: APIVersion of the referenced object
+                    type: string
+                  kind:
+                    description: Kind of the referenced object
+                    type: string
+                  name:
+                    description: Name of the referenced object
+                    type: string
+                required:
+                - apiVersion
+                - kind
+                - name
+                type: object
+            required:
+            - serviceRef
+            type: object
+          status:
+            description: ServiceAliasStatus defines the observed state of ServiceAlias.
+            properties:
+              conditions:
+                description: Conditions represent the latest available observations
+                  of the resource's state
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.1
+  name: services.netguard.sgroups.io
+spec:
+  group: netguard.sgroups.io
+  names:
+    kind: Service
+    listKind: ServiceList
+    plural: services
+    singular: service
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Service is the Schema for the services API.
+        properties:
+          addressGroups:
+            description: AddressGroupsSpec defines the address groups associated with
+              a Service.
+            properties:
+              items:
+                description: Items contains the list of address groups
+                items:
+                  description: NamespacedObjectReference extends ObjectReference with
+                    a Namespace field
+                  properties:
+                    apiVersion:
+                      description: APIVersion of the referenced object
+                      type: string
+                    kind:
+                      description: Kind of the referenced object
+                      type: string
+                    name:
+                      description: Name of the referenced object
+                      type: string
+                    namespace:
+                      description: Namespace of the referenced object
+                      type: string
+                  required:
+                  - apiVersion
+                  - kind
+                  - name
+                  type: object
+                type: array
+            type: object
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          ruleS2SDstOwnRef:
+            description: RuleS2SDstOwnRefSpec defines the RuleS2S objects that reference
+              this Service from other namespaces
+            properties:
+              items:
+                description: Items contains the list of RuleS2S references
+                items:
+                  description: NamespacedObjectReference extends ObjectReference with
+                    a Namespace field
+                  properties:
+                    apiVersion:
+                      description: APIVersion of the referenced object
+                      type: string
+                    kind:
+                      description: Kind of the referenced object
+                      type: string
+                    name:
+                      description: Name of the referenced object
+                      type: string
+                    namespace:
+                      description: Namespace of the referenced object
+                      type: string
+                  required:
+                  - apiVersion
+                  - kind
+                  - name
+                  type: object
+                type: array
+            type: object
+          spec:
+            description: ServiceSpec defines the desired state of Service.
+            properties:
+              description:
+                type: string
+              ingressPorts:
+                description: IngressPorts defines the ports that are allowed for ingress
+                  traffic
+                items:
+                  description: IngressPort defines a port configuration for ingress
+                    traffic
+                  properties:
+                    description:
+                      description: Description of this port configuration
+                      type: string
+                    port:
+                      description: Port or port range (e.g., "80", "8080-9090")
+                      type: string
+                    protocol:
+                      description: Transport protocol for the rule
+                      enum:
+                      - TCP
+                      - UDP
+                      type: string
+                  required:
+                  - port
+                  - protocol
+                  type: object
+                type: array
+            type: object
+          status:
+            description: ServiceStatus defines the observed state of Service.
+            properties:
+              conditions:
+                description: Conditions represent the latest available observations
+                  of the resource's state
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: sgroups-k8s-netguard
+  name: sgroups-k8s-netguard-controller-manager
+  namespace: sgroups-k8s-netguard-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: sgroups-k8s-netguard
+  name: sgroups-k8s-netguard-leader-election-role
+  namespace: sgroups-k8s-netguard-system
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: sgroups-k8s-netguard
+  name: sgroups-k8s-netguard-addressgroupbinding-admin-role
+rules:
+- apiGroups:
+  - netguard.sgroups.io
+  resources:
+  - addressgroupbindings
+  verbs:
+  - '*'
+- apiGroups:
+  - netguard.sgroups.io
+  resources:
+  - addressgroupbindings/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: sgroups-k8s-netguard
+  name: sgroups-k8s-netguard-addressgroupbinding-editor-role
+rules:
+- apiGroups:
+  - netguard.sgroups.io
+  resources:
+  - addressgroupbindings
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - netguard.sgroups.io
+  resources:
+  - addressgroupbindings/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: sgroups-k8s-netguard
+  name: sgroups-k8s-netguard-addressgroupbinding-viewer-role
+rules:
+- apiGroups:
+  - netguard.sgroups.io
+  resources:
+  - addressgroupbindings
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - netguard.sgroups.io
+  resources:
+  - addressgroupbindings/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: sgroups-k8s-netguard
+  name: sgroups-k8s-netguard-addressgroupbindingpolicy-admin-role
+rules:
+- apiGroups:
+  - netguard.sgroups.io
+  resources:
+  - addressgroupbindingpolicies
+  verbs:
+  - '*'
+- apiGroups:
+  - netguard.sgroups.io
+  resources:
+  - addressgroupbindingpolicies/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: sgroups-k8s-netguard
+  name: sgroups-k8s-netguard-addressgroupbindingpolicy-editor-role
+rules:
+- apiGroups:
+  - netguard.sgroups.io
+  resources:
+  - addressgroupbindingpolicies
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - netguard.sgroups.io
+  resources:
+  - addressgroupbindingpolicies/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: sgroups-k8s-netguard
+  name: sgroups-k8s-netguard-addressgroupbindingpolicy-viewer-role
+rules:
+- apiGroups:
+  - netguard.sgroups.io
+  resources:
+  - addressgroupbindingpolicies
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - netguard.sgroups.io
+  resources:
+  - addressgroupbindingpolicies/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: sgroups-k8s-netguard
+  name: sgroups-k8s-netguard-addressgroupportmapping-admin-role
+rules:
+- apiGroups:
+  - netguard.sgroups.io
+  resources:
+  - addressgroupportmappings
+  verbs:
+  - '*'
+- apiGroups:
+  - netguard.sgroups.io
+  resources:
+  - addressgroupportmappings/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: sgroups-k8s-netguard
+  name: sgroups-k8s-netguard-addressgroupportmapping-editor-role
+rules:
+- apiGroups:
+  - netguard.sgroups.io
+  resources:
+  - addressgroupportmappings
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - netguard.sgroups.io
+  resources:
+  - addressgroupportmappings/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: sgroups-k8s-netguard
+  name: sgroups-k8s-netguard-addressgroupportmapping-viewer-role
+rules:
+- apiGroups:
+  - netguard.sgroups.io
+  resources:
+  - addressgroupportmappings
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - netguard.sgroups.io
+  resources:
+  - addressgroupportmappings/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: sgroups-k8s-netguard-manager-role
+rules:
+- apiGroups:
+  - netguard.sgroups.io
+  resources:
+  - addressgroupbindingpolicies
+  - addressgroupbindings
+  - addressgroupportmappings
+  - rules2s
+  - servicealiases
+  - services
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - netguard.sgroups.io
+  resources:
+  - addressgroupbindingpolicies/finalizers
+  - addressgroupbindings/finalizers
+  - addressgroupportmappings/finalizers
+  - rules2s/finalizers
+  - servicealiases/finalizers
+  - services/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - netguard.sgroups.io
+  resources:
+  - addressgroupbindingpolicies/status
+  - addressgroupbindings/status
+  - addressgroupportmappings/status
+  - rules2s/status
+  - servicealiases/status
+  - services/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - provider.sgroups.io
+  resources:
+  - ieagagrules
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: sgroups-k8s-netguard-metrics-auth-role
+rules:
+- apiGroups:
+  - authentication.k8s.io
+  resources:
+  - tokenreviews
+  verbs:
+  - create
+- apiGroups:
+  - authorization.k8s.io
+  resources:
+  - subjectaccessreviews
+  verbs:
+  - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: sgroups-k8s-netguard-metrics-reader
+rules:
+- nonResourceURLs:
+  - /metrics
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: sgroups-k8s-netguard
+  name: sgroups-k8s-netguard-rules2s-admin-role
+rules:
+- apiGroups:
+  - netguard.sgroups.io
+  resources:
+  - rules2s
+  verbs:
+  - '*'
+- apiGroups:
+  - netguard.sgroups.io
+  resources:
+  - rules2s/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: sgroups-k8s-netguard
+  name: sgroups-k8s-netguard-rules2s-editor-role
+rules:
+- apiGroups:
+  - netguard.sgroups.io
+  resources:
+  - rules2s
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - netguard.sgroups.io
+  resources:
+  - rules2s/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: sgroups-k8s-netguard
+  name: sgroups-k8s-netguard-rules2s-viewer-role
+rules:
+- apiGroups:
+  - netguard.sgroups.io
+  resources:
+  - rules2s
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - netguard.sgroups.io
+  resources:
+  - rules2s/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: sgroups-k8s-netguard
+  name: sgroups-k8s-netguard-service-admin-role
+rules:
+- apiGroups:
+  - netguard.sgroups.io
+  resources:
+  - services
+  verbs:
+  - '*'
+- apiGroups:
+  - netguard.sgroups.io
+  resources:
+  - services/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: sgroups-k8s-netguard
+  name: sgroups-k8s-netguard-service-editor-role
+rules:
+- apiGroups:
+  - netguard.sgroups.io
+  resources:
+  - services
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - netguard.sgroups.io
+  resources:
+  - services/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: sgroups-k8s-netguard
+  name: sgroups-k8s-netguard-service-viewer-role
+rules:
+- apiGroups:
+  - netguard.sgroups.io
+  resources:
+  - services
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - netguard.sgroups.io
+  resources:
+  - services/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: sgroups-k8s-netguard
+  name: sgroups-k8s-netguard-servicealias-admin-role
+rules:
+- apiGroups:
+  - netguard.sgroups.io
+  resources:
+  - servicealias
+  verbs:
+  - '*'
+- apiGroups:
+  - netguard.sgroups.io
+  resources:
+  - servicealias/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: sgroups-k8s-netguard
+  name: sgroups-k8s-netguard-servicealias-editor-role
+rules:
+- apiGroups:
+  - netguard.sgroups.io
+  resources:
+  - servicealias
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - netguard.sgroups.io
+  resources:
+  - servicealias/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: sgroups-k8s-netguard
+  name: sgroups-k8s-netguard-servicealias-viewer-role
+rules:
+- apiGroups:
+  - netguard.sgroups.io
+  resources:
+  - servicealias
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - netguard.sgroups.io
+  resources:
+  - servicealias/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: sgroups-k8s-netguard
+  name: sgroups-k8s-netguard-leader-election-rolebinding
+  namespace: sgroups-k8s-netguard-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: sgroups-k8s-netguard-leader-election-role
+subjects:
+- kind: ServiceAccount
+  name: sgroups-k8s-netguard-controller-manager
+  namespace: sgroups-k8s-netguard-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: sgroups-k8s-netguard
+  name: sgroups-k8s-netguard-manager-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: sgroups-k8s-netguard-manager-role
+subjects:
+- kind: ServiceAccount
+  name: sgroups-k8s-netguard-controller-manager
+  namespace: sgroups-k8s-netguard-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: sgroups-k8s-netguard-metrics-auth-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: sgroups-k8s-netguard-metrics-auth-role
+subjects:
+- kind: ServiceAccount
+  name: sgroups-k8s-netguard-controller-manager
+  namespace: sgroups-k8s-netguard-system
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: sgroups-k8s-netguard
+    control-plane: controller-manager
+  name: sgroups-k8s-netguard-controller-manager-metrics-service
+  namespace: sgroups-k8s-netguard-system
+spec:
+  ports:
+  - name: https
+    port: 8443
+    protocol: TCP
+    targetPort: 8443
+  selector:
+    app.kubernetes.io/name: sgroups-k8s-netguard
+    control-plane: controller-manager
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: sgroups-k8s-netguard
+  name: sgroups-k8s-netguard-webhook-service
+  namespace: sgroups-k8s-netguard-system
+spec:
+  ports:
+  - port: 443
+    protocol: TCP
+    targetPort: 9443
+  selector:
+    app.kubernetes.io/name: sgroups-k8s-netguard
+    control-plane: controller-manager
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: sgroups-k8s-netguard
+    control-plane: controller-manager
+  name: sgroups-k8s-netguard-controller-manager
+  namespace: sgroups-k8s-netguard-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sgroups-k8s-netguard
+      control-plane: controller-manager
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: manager
+      labels:
+        app.kubernetes.io/name: sgroups-k8s-netguard
+        control-plane: controller-manager
+    spec:
+      containers:
+      - args:
+        - --metrics-bind-address=:8443
+        - --leader-elect
+        - --health-probe-bind-address=:8081
+        - --webhook-cert-path=/tmp/k8s-webhook-server/serving-certs
+        command:
+        - /manager
+        image: controller:latest
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        name: manager
+        ports:
+        - containerPort: 9443
+          name: webhook-server
+          protocol: TCP
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: 500m
+            memory: 128Mi
+          requests:
+            cpu: 10m
+            memory: 64Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - mountPath: /tmp/k8s-webhook-server/serving-certs
+          name: webhook-certs
+          readOnly: true
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      serviceAccountName: sgroups-k8s-netguard-controller-manager
+      terminationGracePeriodSeconds: 10
+      volumes:
+      - name: webhook-certs
+        secret:
+          secretName: webhook-server-cert
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: sgroups-k8s-netguard-validating-webhook-configuration
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: sgroups-k8s-netguard-webhook-service
+      namespace: sgroups-k8s-netguard-system
+      path: /validate-netguard-sgroups-io-v1alpha1-addressgroupbinding
+  failurePolicy: Fail
+  name: vaddressgroupbinding-v1alpha1.kb.io
+  rules:
+  - apiGroups:
+    - netguard.sgroups.io
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - addressgroupbindings
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: sgroups-k8s-netguard-webhook-service
+      namespace: sgroups-k8s-netguard-system
+      path: /validate-netguard-sgroups-io-v1alpha1-addressgroupbindingpolicy
+  failurePolicy: Fail
+  name: vaddressgroupbindingpolicy-v1alpha1.kb.io
+  rules:
+  - apiGroups:
+    - netguard.sgroups.io
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    - DELETE
+    resources:
+    - addressgroupbindingpolicies
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: sgroups-k8s-netguard-webhook-service
+      namespace: sgroups-k8s-netguard-system
+      path: /validate-netguard-sgroups-io-v1alpha1-addressgroupportmapping
+  failurePolicy: Fail
+  name: vaddressgroupportmapping-v1alpha1.kb.io
+  rules:
+  - apiGroups:
+    - netguard.sgroups.io
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - addressgroupportmappings
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: sgroups-k8s-netguard-webhook-service
+      namespace: sgroups-k8s-netguard-system
+      path: /validate-netguard-sgroups-io-v1alpha1-rules2s
+  failurePolicy: Fail
+  name: vrules2s-v1alpha1.kb.io
+  rules:
+  - apiGroups:
+    - netguard.sgroups.io
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - rules2s
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: sgroups-k8s-netguard-webhook-service
+      namespace: sgroups-k8s-netguard-system
+      path: /validate-netguard-sgroups-io-v1alpha1-service
+  failurePolicy: Fail
+  name: vservice-v1alpha1.kb.io
+  rules:
+  - apiGroups:
+    - netguard.sgroups.io
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - services
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: sgroups-k8s-netguard-webhook-service
+      namespace: sgroups-k8s-netguard-system
+      path: /validate-netguard-sgroups-io-v1alpha1-servicealias
+  failurePolicy: Fail
+  name: vservicealias-v1alpha1.kb.io
+  rules:
+  - apiGroups:
+    - netguard.sgroups.io
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - servicealias
+  sideEffects: None

@@ -71,6 +71,22 @@ func (v *AddressGroupBindingPolicyCustomValidator) ValidateCreate(ctx context.Co
 
 	// 1.1 Check that an AddressGroup with the same name exists in the same namespace
 	addressGroupRef := policy.Spec.AddressGroupRef
+
+	// Check that AddressGroupRef name is not empty
+	if addressGroupRef.GetName() == "" {
+		return nil, fmt.Errorf("AddressGroup.name cannot be empty")
+	}
+
+	// Check that AddressGroupRef kind is correct
+	if addressGroupRef.GetKind() != "AddressGroup" {
+		return nil, fmt.Errorf("addressGroupRef must be to an AddressGroup resource, got %s", addressGroupRef.GetKind())
+	}
+
+	// Check that AddressGroupRef apiVersion is correct
+	if addressGroupRef.GetAPIVersion() != "netguard.sgroups.io/v1alpha1" {
+		return nil, fmt.Errorf("addressGroupRef must be to a resource with APIVersion netguard.sgroups.io/v1alpha1, got %s", addressGroupRef.GetAPIVersion())
+	}
+
 	addressGroupNamespace := ResolveNamespace(addressGroupRef.GetNamespace(), policy.GetNamespace())
 
 	// Validate that the policy is created in the same namespace as the address group

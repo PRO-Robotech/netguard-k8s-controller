@@ -74,7 +74,7 @@ func (v *ServiceAliasCustomValidator) ValidateCreate(ctx context.Context, obj ru
 	service := &netguardv1alpha1.Service{}
 	err := v.Client.Get(ctx, client.ObjectKey{
 		Name:      serviceAlias.Spec.ServiceRef.GetName(),
-		Namespace: serviceAlias.Spec.ServiceRef.ResolveNamespace(serviceAlias.GetNamespace()),
+		Namespace: serviceAlias.GetNamespace(), // ServiceAlias can only reference Service in the same namespace
 	}, service)
 
 	if err != nil {

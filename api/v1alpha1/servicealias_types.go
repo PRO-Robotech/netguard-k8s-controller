@@ -27,7 +27,7 @@ import (
 type ServiceAliasSpec struct {
 	// ServiceRef is a reference to the Service resource this alias points to
 	// +kubebuilder:validation:Required
-	ServiceRef NamespacedObjectReference `json:"serviceRef"`
+	ServiceRef ObjectReference `json:"serviceRef"`
 }
 
 // ServiceAliasStatus defines the observed state of ServiceAlias.
