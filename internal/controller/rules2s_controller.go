@@ -23,12 +23,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/pointer"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -44,7 +44,6 @@ import (
 type RuleS2SReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
-	Log    logr.Logger
 }
 
 // +kubebuilder:rbac:groups=netguard.sgroups.io,resources=rules2s,verbs=get;list;watch;create;update;patch;delete
@@ -59,8 +58,8 @@ type RuleS2SReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.20.0/pkg/reconcile
 func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := log.FromContext(ctx)
-	log.Info("Reconciling RuleS2S", "request", req)
+	logger := log.FromContext(ctx)
+	logger.Info("Reconciling RuleS2S", "request", req)
 
 	// Fetch the RuleS2S instance
 	ruleS2S := &netguardv1alpha1.RuleS2S{}
@@ -77,7 +76,7 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if !ruleS2S.DeletionTimestamp.IsZero() {
 		// Delete related IEAgAgRules
 		if err := r.deleteRelatedIEAgAgRules(ctx, ruleS2S); err != nil {
-			log.Error(err, "Failed to delete related IEAgAgRules")
+			logger.Error(err, "Failed to delete related IEAgAgRules")
 			return ctrl.Result{}, err
 		}
 
@@ -99,7 +98,7 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			Message: fmt.Sprintf("Local service alias not found: %v", err),
 		})
 		if err := UpdateStatusWithRetry(ctx, r.Client, ruleS2S, DefaultMaxRetries); err != nil {
-			log.Error(err, "Failed to update RuleS2S status")
+			logger.Error(err, "Failed to update RuleS2S status")
 		}
 		return ctrl.Result{RequeueAfter: time.Minute}, err
 	}
@@ -118,7 +117,7 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			Message: fmt.Sprintf("Target service alias not found: %v", err),
 		})
 		if err := UpdateStatusWithRetry(ctx, r.Client, ruleS2S, DefaultMaxRetries); err != nil {
-			log.Error(err, "Failed to update RuleS2S status")
+			logger.Error(err, "Failed to update RuleS2S status")
 		}
 		return ctrl.Result{RequeueAfter: time.Minute}, err
 	}
@@ -138,7 +137,7 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			Message: fmt.Sprintf("Local service not found: %v", err),
 		})
 		if err := UpdateStatusWithRetry(ctx, r.Client, ruleS2S, DefaultMaxRetries); err != nil {
-			log.Error(err, "Failed to update RuleS2S status")
+			logger.Error(err, "Failed to update RuleS2S status")
 		}
 		return ctrl.Result{RequeueAfter: time.Minute}, err
 	}
@@ -157,7 +156,7 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			Message: fmt.Sprintf("Target service not found: %v", err),
 		})
 		if err := UpdateStatusWithRetry(ctx, r.Client, ruleS2S, DefaultMaxRetries); err != nil {
-			log.Error(err, "Failed to update RuleS2S status")
+			logger.Error(err, "Failed to update RuleS2S status")
 		}
 		return ctrl.Result{RequeueAfter: time.Minute}, err
 	}
@@ -185,18 +184,18 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 				})
 
 			if err := r.Update(ctx, targetService); err != nil {
-				log.Error(err, "Failed to update target service RuleS2SDstOwnRef")
+				logger.Error(err, "Failed to update target service RuleS2SDstOwnRef")
 				return ctrl.Result{RequeueAfter: time.Minute}, err
 			}
 		}
 	} else {
 		// For rules in the same namespace, use owner references
 		if err := controllerutil.SetControllerReference(targetService, ruleS2S, r.Scheme); err != nil {
-			log.Error(err, "Failed to set owner reference")
+			logger.Error(err, "Failed to set owner reference")
 			return ctrl.Result{RequeueAfter: time.Minute}, err
 		}
 		if err := r.Update(ctx, ruleS2S); err != nil {
-			log.Error(err, "Failed to update RuleS2S with owner reference")
+			logger.Error(err, "Failed to update RuleS2S with owner reference")
 			return ctrl.Result{RequeueAfter: time.Minute}, err
 		}
 	}
@@ -214,7 +213,7 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			Message: "One or both services have no address groups",
 		})
 		if err := UpdateStatusWithRetry(ctx, r.Client, ruleS2S, DefaultMaxRetries); err != nil {
-			log.Error(err, "Failed to update RuleS2S status")
+			logger.Error(err, "Failed to update RuleS2S status")
 		}
 		return ctrl.Result{RequeueAfter: time.Minute}, fmt.Errorf("one or both services have no address groups")
 	}
@@ -239,7 +238,7 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			Message: "No ports defined for the service",
 		})
 		if err := UpdateStatusWithRetry(ctx, r.Client, ruleS2S, DefaultMaxRetries); err != nil {
-			log.Error(err, "Failed to update RuleS2S status")
+			logger.Error(err, "Failed to update RuleS2S status")
 		}
 		return ctrl.Result{RequeueAfter: time.Minute}, fmt.Errorf("no ports defined for the service")
 	}
@@ -269,7 +268,7 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 				ruleName, err := r.createOrUpdateIEAgAgRule(ctx, ruleS2S, localAG, targetAG,
 					netguardv1alpha1.ProtocolTCP, combinedTcpPorts)
 				if err != nil {
-					log.Error(err, "Failed to create/update TCP rule")
+					logger.Error(err, "Failed to create/update TCP rule")
 					continue
 				}
 				createdRules = append(createdRules, ruleName)
@@ -284,7 +283,7 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 				ruleName, err := r.createOrUpdateIEAgAgRule(ctx, ruleS2S, localAG, targetAG,
 					netguardv1alpha1.ProtocolUDP, combinedUdpPorts)
 				if err != nil {
-					log.Error(err, "Failed to create/update UDP rule")
+					logger.Error(err, "Failed to create/update UDP rule")
 					continue
 				}
 				createdRules = append(createdRules, ruleName)
@@ -301,7 +300,7 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			Message: fmt.Sprintf("Created rules: %s", strings.Join(createdRules, ", ")),
 		})
 		if err := UpdateStatusWithRetry(ctx, r.Client, ruleS2S, DefaultMaxRetries); err != nil {
-			log.Error(err, "Failed to update RuleS2S status")
+			logger.Error(err, "Failed to update RuleS2S status")
 			return ctrl.Result{}, err
 		}
 	} else {
@@ -312,7 +311,7 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			Message: "Failed to create any rules",
 		})
 		if err := UpdateStatusWithRetry(ctx, r.Client, ruleS2S, DefaultMaxRetries); err != nil {
-			log.Error(err, "Failed to update RuleS2S status")
+			logger.Error(err, "Failed to update RuleS2S status")
 		}
 		return ctrl.Result{RequeueAfter: time.Minute}, fmt.Errorf("failed to create any rules")
 	}
@@ -330,6 +329,7 @@ func (r *RuleS2SReconciler) createOrUpdateIEAgAgRule(
 	portsStr string,
 ) (string, error) {
 	// Determine namespace for the rule based on traffic direction
+	logger := log.FromContext(ctx)
 	var ruleNamespace string
 	if ruleS2S.Spec.Traffic == "ingress" {
 		// For ingress, rule goes in the local AG namespace (receiver)
@@ -352,7 +352,7 @@ func (r *RuleS2SReconciler) createOrUpdateIEAgAgRule(
 		targetAG.Name,
 		string(protocol))
 
-	r.Log.Info("Creating rule", "namespace", ruleNamespace, "ruleName", ruleName, "traffic", ruleS2S.Spec.Traffic)
+	logger.Info("Creating rule", "namespace", ruleNamespace, "ruleName", ruleName, "traffic", ruleS2S.Spec.Traffic)
 
 	// Define the rule spec
 	ruleSpec := providerv1alpha1.IEAgAgRuleSpec{
@@ -395,7 +395,7 @@ func (r *RuleS2SReconciler) createOrUpdateIEAgAgRule(
 
 	if err != nil && errors.IsNotFound(err) {
 		// Rule doesn't exist, create it with retry
-		r.Log.Info("Creating new IEAgAgRule", "namespace", ruleNamespace, "name", ruleName)
+		logger.Info("Creating new IEAgAgRule", "namespace", ruleNamespace, "name", ruleName)
 
 		// Create the rule
 		newRule := &providerv1alpha1.IEAgAgRule{
@@ -403,12 +403,19 @@ func (r *RuleS2SReconciler) createOrUpdateIEAgAgRule(
 				Name:      ruleName,
 				Namespace: ruleNamespace,
 				OwnerReferences: []metav1.OwnerReference{
-					*metav1.NewControllerRef(ruleS2S, netguardv1alpha1.GroupVersion.WithKind("RuleS2S")),
+					{
+						APIVersion:         netguardv1alpha1.GroupVersion.String(),
+						Kind:               "RuleS2S",
+						Name:               ruleS2S.GetName(),
+						UID:                ruleS2S.GetUID(),
+						Controller:         pointer.Bool(false),
+						BlockOwnerDeletion: pointer.Bool(true),
+					},
 				},
 			},
 			Spec: ruleSpec,
 		}
-
+		logger.Info("IEAgAgRule owner refs", "rule", newRule.Name, "refs", newRule.OwnerReferences)
 		// Try to create with retries
 		for i := 0; i < DefaultMaxRetries; i++ {
 			if err := r.Create(ctx, newRule); err != nil {
@@ -445,7 +452,7 @@ func (r *RuleS2SReconciler) createOrUpdateIEAgAgRule(
 	}
 
 	// Rule exists, update it using patch with retry
-	r.Log.Info("Updating existing IEAgAgRule", "namespace", ruleNamespace, "name", ruleName)
+	logger.Info("Updating existing IEAgAgRule", "namespace", ruleNamespace, "name", ruleName)
 
 	// Get the latest version of the rule to avoid conflicts
 	latestRule := &providerv1alpha1.IEAgAgRule{}
@@ -514,7 +521,7 @@ func (r *RuleS2SReconciler) deleteRelatedIEAgAgRules(ctx context.Context, ruleS2
 	// Check each rule for an OwnerReference to this RuleS2S
 	for _, rule := range ieAgAgRuleList.Items {
 		for _, ownerRef := range rule.GetOwnerReferences() {
-			if ownerRef.UID == ruleS2S.UID &&
+			if ownerRef.UID == ruleS2S.GetUID() &&
 				ownerRef.Kind == "RuleS2S" &&
 				ownerRef.APIVersion == netguardv1alpha1.GroupVersion.String() {
 
@@ -543,7 +550,7 @@ func (r *RuleS2SReconciler) findRuleS2SForService(ctx context.Context, obj clien
 		return nil
 	}
 
-	logger := r.Log.WithValues("service", service.Name, "namespace", service.Namespace)
+	logger := log.FromContext(ctx).WithValues("service", service.Name, "namespace", service.Namespace)
 	logger.Info("Finding RuleS2S resources for Service")
 
 	// Find all ServiceAlias objects that reference this Service
@@ -609,7 +616,7 @@ func (r *RuleS2SReconciler) findRuleS2SForServiceAlias(ctx context.Context, obj 
 		return nil
 	}
 
-	logger := r.Log.WithValues("serviceAlias", serviceAlias.Name, "namespace", serviceAlias.Namespace)
+	logger := log.FromContext(ctx).WithValues("serviceAlias", serviceAlias.Name, "namespace", serviceAlias.Namespace)
 	logger.Info("Finding RuleS2S resources for ServiceAlias")
 
 	var requests []reconcile.Request
@@ -658,7 +665,7 @@ func (r *RuleS2SReconciler) findRuleS2SForAddressGroupBinding(ctx context.Contex
 		return nil
 	}
 
-	logger := r.Log.WithValues("binding", binding.Name, "namespace", binding.Namespace)
+	logger := log.FromContext(ctx).WithValues("binding", binding.Name, "namespace", binding.Namespace)
 	logger.Info("Finding RuleS2S resources for AddressGroupBinding")
 
 	// Get the Service referenced by the binding
