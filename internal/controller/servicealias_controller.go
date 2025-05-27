@@ -72,6 +72,35 @@ func (r *ServiceAliasReconciler) reconcileDelete(ctx context.Context, serviceAli
 		return ctrl.Result{}, nil
 	}
 
+	// Check if there are any RuleS2S resources that reference this ServiceAlias
+	ruleS2SList := &netguardv1alpha1.RuleS2SList{}
+	if err := r.List(ctx, ruleS2SList); err != nil {
+		logger.Error(err, "Failed to list RuleS2S objects")
+		return ctrl.Result{}, err
+	}
+
+	// Check if any rules reference this ServiceAlias
+	for _, rule := range ruleS2SList.Items {
+		// Check if the rule references this ServiceAlias as local service
+		if rule.Spec.ServiceLocalRef.Name == freshServiceAlias.Name &&
+			rule.Namespace == freshServiceAlias.Namespace {
+			logger.Info("Cannot delete ServiceAlias: it is referenced by RuleS2S as local service",
+				"serviceAlias", freshServiceAlias.Name, "rule", rule.Name)
+			return ctrl.Result{}, fmt.Errorf("cannot delete ServiceAlias %s: it is referenced by RuleS2S %s as local service",
+				freshServiceAlias.Name, rule.Name)
+		}
+
+		// Check if the rule references this ServiceAlias as target service
+		targetNamespace := rule.Spec.ServiceRef.ResolveNamespace(rule.Namespace)
+		if rule.Spec.ServiceRef.Name == freshServiceAlias.Name &&
+			targetNamespace == freshServiceAlias.Namespace {
+			logger.Info("Cannot delete ServiceAlias: it is referenced by RuleS2S as target service",
+				"serviceAlias", freshServiceAlias.Name, "rule", rule.Name)
+			return ctrl.Result{}, fmt.Errorf("cannot delete ServiceAlias %s: it is referenced by RuleS2S %s as target service",
+				freshServiceAlias.Name, rule.Name)
+		}
+	}
+
 	// Remove the finalizer
 	controllerutil.RemoveFinalizer(freshServiceAlias, finalizer)
 

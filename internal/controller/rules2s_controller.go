@@ -518,9 +518,13 @@ func (r *RuleS2SReconciler) deleteRelatedIEAgAgRules(ctx context.Context, ruleS2
 		return err
 	}
 
+	logger.Info("Deleting IEAgAgRules")
+	logger.Info("Deleting rule", "ruleName", ruleS2S.GetName(), "uuid", ruleS2S.GetUID())
+	logger.Info("ieAgAgRuleList", "listNumber", len(ieAgAgRuleList.Items))
 	// Check each rule for an OwnerReference to this RuleS2S
 	for _, rule := range ieAgAgRuleList.Items {
 		for _, ownerRef := range rule.GetOwnerReferences() {
+			logger.Info("Deleting rule", "Kind", ownerRef.Kind, "uuid", ownerRef.UID)
 			if ownerRef.UID == ruleS2S.GetUID() &&
 				ownerRef.Kind == "RuleS2S" &&
 				ownerRef.APIVersion == netguardv1alpha1.GroupVersion.String() {
