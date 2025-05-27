@@ -32,7 +32,9 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	netguardv1alpha1 "sgroups.io/netguard/api/v1alpha1"
 	providerv1alpha1 "sgroups.io/netguard/deps/apis/sgroups-k8s-provider/v1alpha1"
@@ -534,10 +536,192 @@ func (r *RuleS2SReconciler) deleteRelatedIEAgAgRules(ctx context.Context, ruleS2
 	return nil
 }
 
+// findRuleS2SForService finds all RuleS2S resources that reference a Service through ServiceAlias
+func (r *RuleS2SReconciler) findRuleS2SForService(ctx context.Context, obj client.Object) []reconcile.Request {
+	service, ok := obj.(*netguardv1alpha1.Service)
+	if !ok {
+		return nil
+	}
+
+	logger := r.Log.WithValues("service", service.Name, "namespace", service.Namespace)
+	logger.Info("Finding RuleS2S resources for Service")
+
+	// Find all ServiceAlias objects that reference this Service
+	serviceAliasList := &netguardv1alpha1.ServiceAliasList{}
+	if err := r.List(ctx, serviceAliasList); err != nil {
+		logger.Error(err, "Failed to list ServiceAlias objects")
+		return nil
+	}
+
+	var requests []reconcile.Request
+
+	// For each ServiceAlias that references this Service
+	for _, serviceAlias := range serviceAliasList.Items {
+		if serviceAlias.Spec.ServiceRef.GetName() == service.Name &&
+			(serviceAlias.Spec.ServiceRef.GetNamespace() == "" ||
+				serviceAlias.Spec.ServiceRef.ResolveNamespace(serviceAlias.Namespace) == service.Namespace) {
+
+			// Find all RuleS2S objects that reference this ServiceAlias
+			ruleS2SList := &netguardv1alpha1.RuleS2SList{}
+			if err := r.List(ctx, ruleS2SList); err != nil {
+				logger.Error(err, "Failed to list RuleS2S objects")
+				continue
+			}
+
+			for _, rule := range ruleS2SList.Items {
+				// Check if the rule references this ServiceAlias as local service
+				if rule.Spec.ServiceLocalRef.Name == serviceAlias.Name &&
+					rule.Namespace == serviceAlias.Namespace {
+					requests = append(requests, reconcile.Request{
+						NamespacedName: types.NamespacedName{
+							Name:      rule.Name,
+							Namespace: rule.Namespace,
+						},
+					})
+					logger.Info("Found RuleS2S referencing ServiceAlias as local service",
+						"rule", rule.Name, "serviceAlias", serviceAlias.Name)
+				}
+
+				// Check if the rule references this ServiceAlias as target service
+				targetNamespace := rule.Spec.ServiceRef.ResolveNamespace(rule.Namespace)
+				if rule.Spec.ServiceRef.Name == serviceAlias.Name &&
+					targetNamespace == serviceAlias.Namespace {
+					requests = append(requests, reconcile.Request{
+						NamespacedName: types.NamespacedName{
+							Name:      rule.Name,
+							Namespace: rule.Namespace,
+						},
+					})
+					logger.Info("Found RuleS2S referencing ServiceAlias as target service",
+						"rule", rule.Name, "serviceAlias", serviceAlias.Name)
+				}
+			}
+		}
+	}
+
+	return requests
+}
+
+// findRuleS2SForServiceAlias finds all RuleS2S resources that reference a ServiceAlias
+func (r *RuleS2SReconciler) findRuleS2SForServiceAlias(ctx context.Context, obj client.Object) []reconcile.Request {
+	serviceAlias, ok := obj.(*netguardv1alpha1.ServiceAlias)
+	if !ok {
+		return nil
+	}
+
+	logger := r.Log.WithValues("serviceAlias", serviceAlias.Name, "namespace", serviceAlias.Namespace)
+	logger.Info("Finding RuleS2S resources for ServiceAlias")
+
+	var requests []reconcile.Request
+
+	// Find all RuleS2S objects that reference this ServiceAlias
+	ruleS2SList := &netguardv1alpha1.RuleS2SList{}
+	if err := r.List(ctx, ruleS2SList); err != nil {
+		logger.Error(err, "Failed to list RuleS2S objects")
+		return nil
+	}
+
+	for _, rule := range ruleS2SList.Items {
+		// Check if the rule references this ServiceAlias as local service
+		if rule.Spec.ServiceLocalRef.Name == serviceAlias.Name &&
+			rule.Namespace == serviceAlias.Namespace {
+			requests = append(requests, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      rule.Name,
+					Namespace: rule.Namespace,
+				},
+			})
+			logger.Info("Found RuleS2S referencing ServiceAlias as local service", "rule", rule.Name)
+		}
+
+		// Check if the rule references this ServiceAlias as target service
+		targetNamespace := rule.Spec.ServiceRef.ResolveNamespace(rule.Namespace)
+		if rule.Spec.ServiceRef.Name == serviceAlias.Name &&
+			targetNamespace == serviceAlias.Namespace {
+			requests = append(requests, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      rule.Name,
+					Namespace: rule.Namespace,
+				},
+			})
+			logger.Info("Found RuleS2S referencing ServiceAlias as target service", "rule", rule.Name)
+		}
+	}
+
+	return requests
+}
+
+// findRuleS2SForAddressGroupBinding finds all RuleS2S resources that may be affected by changes to an AddressGroupBinding
+func (r *RuleS2SReconciler) findRuleS2SForAddressGroupBinding(ctx context.Context, obj client.Object) []reconcile.Request {
+	binding, ok := obj.(*netguardv1alpha1.AddressGroupBinding)
+	if !ok {
+		return nil
+	}
+
+	logger := r.Log.WithValues("binding", binding.Name, "namespace", binding.Namespace)
+	logger.Info("Finding RuleS2S resources for AddressGroupBinding")
+
+	// Get the Service referenced by the binding
+	service := &netguardv1alpha1.Service{}
+	if err := r.Get(ctx, types.NamespacedName{
+		Name:      binding.Spec.ServiceRef.Name,
+		Namespace: binding.Namespace,
+	}, service); err != nil {
+		logger.Error(err, "Failed to get Service referenced by AddressGroupBinding")
+		return nil
+	}
+
+	// Use the findRuleS2SForService function to find affected RuleS2S resources
+	return r.findRuleS2SForService(ctx, service)
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *RuleS2SReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	// Add indexes for faster lookups
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(),
+		&netguardv1alpha1.ServiceAlias{}, "spec.serviceRef.name",
+		func(obj client.Object) []string {
+			serviceAlias := obj.(*netguardv1alpha1.ServiceAlias)
+			return []string{serviceAlias.Spec.ServiceRef.Name}
+		}); err != nil {
+		return err
+	}
+
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(),
+		&netguardv1alpha1.RuleS2S{}, "spec.serviceLocalRef.name",
+		func(obj client.Object) []string {
+			rule := obj.(*netguardv1alpha1.RuleS2S)
+			return []string{rule.Spec.ServiceLocalRef.Name}
+		}); err != nil {
+		return err
+	}
+
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(),
+		&netguardv1alpha1.RuleS2S{}, "spec.serviceRef.name",
+		func(obj client.Object) []string {
+			rule := obj.(*netguardv1alpha1.RuleS2S)
+			return []string{rule.Spec.ServiceRef.Name}
+		}); err != nil {
+		return err
+	}
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&netguardv1alpha1.RuleS2S{}).
+		// Watch for changes to Service resources
+		Watches(
+			&netguardv1alpha1.Service{},
+			handler.EnqueueRequestsFromMapFunc(r.findRuleS2SForService),
+		).
+		// Watch for changes to ServiceAlias resources
+		Watches(
+			&netguardv1alpha1.ServiceAlias{},
+			handler.EnqueueRequestsFromMapFunc(r.findRuleS2SForServiceAlias),
+		).
+		// Watch for changes to AddressGroupBinding resources
+		Watches(
+			&netguardv1alpha1.AddressGroupBinding{},
+			handler.EnqueueRequestsFromMapFunc(r.findRuleS2SForAddressGroupBinding),
+		).
 		Named("rules2s").
 		Complete(r)
 }
