@@ -679,15 +679,6 @@ func (r *RuleS2SReconciler) findRuleS2SForAddressGroupBinding(ctx context.Contex
 func (r *RuleS2SReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// Add indexes for faster lookups
 	if err := mgr.GetFieldIndexer().IndexField(context.Background(),
-		&netguardv1alpha1.ServiceAlias{}, "spec.serviceRef.name",
-		func(obj client.Object) []string {
-			serviceAlias := obj.(*netguardv1alpha1.ServiceAlias)
-			return []string{serviceAlias.Spec.ServiceRef.Name}
-		}); err != nil {
-		return err
-	}
-
-	if err := mgr.GetFieldIndexer().IndexField(context.Background(),
 		&netguardv1alpha1.RuleS2S{}, "spec.serviceLocalRef.name",
 		func(obj client.Object) []string {
 			rule := obj.(*netguardv1alpha1.RuleS2S)
