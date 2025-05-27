@@ -26,6 +26,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/pointer"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -160,6 +161,13 @@ func (r *AddressGroupBindingReconciler) reconcileNormal(ctx context.Context, bin
 					Items: []netguardv1alpha1.ServicePortsRef{},
 				},
 			}
+
+			// Add OwnerReference to AddressGroup
+			if err := controllerutil.SetControllerReference(addressGroup, portMapping, r.Scheme); err != nil {
+				logger.Error(err, "Failed to set owner reference on AddressGroupPortMapping")
+				return ctrl.Result{}, err
+			}
+
 			if err := r.Create(ctx, portMapping); err != nil {
 				logger.Error(err, "Failed to create AddressGroupPortMapping")
 				return ctrl.Result{}, err
@@ -167,6 +175,45 @@ func (r *AddressGroupBindingReconciler) reconcileNormal(ctx context.Context, bin
 			logger.Info("Created new AddressGroupPortMapping", "name", portMapping.GetName(), "namespace", portMapping.GetNamespace())
 		} else {
 			logger.Error(err, "Failed to get AddressGroupPortMapping")
+			return ctrl.Result{}, err
+		}
+	}
+
+	// Add OwnerReferences to the binding for Service and AddressGroup
+	ownerRefsUpdated := false
+
+	// Add OwnerReference to Service
+	serviceOwnerRef := metav1.OwnerReference{
+		APIVersion:         service.APIVersion,
+		Kind:               service.Kind,
+		Name:               service.Name,
+		UID:                service.UID,
+		BlockOwnerDeletion: pointer.Bool(false),
+		Controller:         pointer.Bool(false),
+	}
+	if !containsOwnerReference(binding.GetOwnerReferences(), serviceOwnerRef) {
+		binding.OwnerReferences = append(binding.OwnerReferences, serviceOwnerRef)
+		ownerRefsUpdated = true
+	}
+
+	// Add OwnerReference to AddressGroup
+	agOwnerRef := metav1.OwnerReference{
+		APIVersion:         addressGroup.APIVersion,
+		Kind:               addressGroup.Kind,
+		Name:               addressGroup.Name,
+		UID:                addressGroup.UID,
+		BlockOwnerDeletion: pointer.Bool(false),
+		Controller:         pointer.Bool(false),
+	}
+	if !containsOwnerReference(binding.GetOwnerReferences(), agOwnerRef) {
+		binding.OwnerReferences = append(binding.OwnerReferences, agOwnerRef)
+		ownerRefsUpdated = true
+	}
+
+	// If owner references were updated, update the binding
+	if ownerRefsUpdated {
+		if err := r.Update(ctx, binding); err != nil {
+			logger.Error(err, "Failed to update AddressGroupBinding with owner references")
 			return ctrl.Result{}, err
 		}
 	}
@@ -359,6 +406,16 @@ func setCondition(binding *netguardv1alpha1.AddressGroupBinding, conditionType s
 
 	// Condition not found, append it
 	binding.Status.Conditions = append(binding.Status.Conditions, condition)
+}
+
+// containsOwnerReference checks if the list of owner references contains a reference with the same UID
+func containsOwnerReference(refs []metav1.OwnerReference, ref metav1.OwnerReference) bool {
+	for _, r := range refs {
+		if r.UID == ref.UID {
+			return true
+		}
+	}
+	return false
 }
 
 // findBindingsForService finds bindings that reference a specific service

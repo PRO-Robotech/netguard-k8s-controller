@@ -73,8 +73,13 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	// Check if the resource is being deleted
 	if !ruleS2S.DeletionTimestamp.IsZero() {
-		// Resource is being deleted, no need to do anything as owner references
-		// will handle the deletion of child resources
+		// Delete related IEAgAgRules
+		if err := r.deleteRelatedIEAgAgRules(ctx, ruleS2S); err != nil {
+			log.Error(err, "Failed to delete related IEAgAgRules")
+			return ctrl.Result{}, err
+		}
+
+		// Resource is being deleted, no need to do anything else
 		return ctrl.Result{}, nil
 	}
 
@@ -492,6 +497,41 @@ func (r *RuleS2SReconciler) generateRuleName(
 	return fmt.Sprintf("%s-%s",
 		strings.ToLower(trafficDirection)[:3],
 		uuid)
+}
+
+// deleteRelatedIEAgAgRules deletes all IEAgAgRules that have an OwnerReference to the given RuleS2S
+func (r *RuleS2SReconciler) deleteRelatedIEAgAgRules(ctx context.Context, ruleS2S *netguardv1alpha1.RuleS2S) error {
+	logger := log.FromContext(ctx)
+
+	// Get all IEAgAgRules across all namespaces
+	ieAgAgRuleList := &providerv1alpha1.IEAgAgRuleList{}
+	if err := r.List(ctx, ieAgAgRuleList); err != nil {
+		return err
+	}
+
+	// Check each rule for an OwnerReference to this RuleS2S
+	for _, rule := range ieAgAgRuleList.Items {
+		for _, ownerRef := range rule.GetOwnerReferences() {
+			if ownerRef.UID == ruleS2S.UID &&
+				ownerRef.Kind == "RuleS2S" &&
+				ownerRef.APIVersion == netguardv1alpha1.GroupVersion.String() {
+
+				// Found a rule that references this RuleS2S
+				logger.Info("Deleting related IEAgAgRule", "name", rule.Name, "namespace", rule.Namespace)
+
+				// Delete the rule
+				if err := r.Delete(ctx, &rule); err != nil {
+					if !errors.IsNotFound(err) {
+						logger.Error(err, "Failed to delete related IEAgAgRule",
+							"name", rule.Name, "namespace", rule.Namespace)
+						return err
+					}
+				}
+			}
+		}
+	}
+
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
