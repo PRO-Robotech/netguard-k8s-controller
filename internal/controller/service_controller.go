@@ -27,7 +27,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -70,19 +69,11 @@ func (r *ServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	// Add finalizer if it doesn't exist
 	const finalizer = "service.netguard.sgroups.io/finalizer"
-	if !controllerutil.ContainsFinalizer(service, finalizer) {
-		controllerutil.AddFinalizer(service, finalizer)
-		if err := r.Update(ctx, service); err != nil {
-			logger.Error(err, "Failed to add finalizer to Service")
-			return ctrl.Result{}, err
-		}
-		// Get the updated service after adding the finalizer
-		if err := r.Get(ctx, req.NamespacedName, service); err != nil {
-			logger.Error(err, "Failed to get updated Service")
-			return ctrl.Result{}, err
-		}
-		// Continue processing without requeue
+	if err := EnsureFinalizer(ctx, r.Client, service, finalizer); err != nil {
+		logger.Error(err, "Failed to add finalizer to Service")
+		return ctrl.Result{}, err
 	}
+	// Continue processing without requeue
 
 	// Check if the resource is being deleted
 	if !service.DeletionTimestamp.IsZero() {
@@ -159,8 +150,13 @@ func (r *ServiceReconciler) reconcileNormal(ctx context.Context, service *netgua
 						for j, updatedSp := range updatedPortMapping.AccessPorts.Items {
 							if updatedSp.GetName() == service.GetName() &&
 								updatedSp.GetNamespace() == service.GetNamespace() {
+								// Create a copy for patching
+								original := updatedPortMapping.DeepCopy()
 								updatedPortMapping.AccessPorts.Items[j].Ports = servicePortsRef.Ports
-								if err := r.Update(ctx, updatedPortMapping); err != nil {
+
+								// Apply patch with retry
+								patch := client.MergeFrom(original)
+								if err := PatchWithRetry(ctx, r.Client, updatedPortMapping, patch, DefaultMaxRetries); err != nil {
 									logger.Error(err, "Failed to update AddressGroupPortMapping.AccessPorts")
 									return ctrl.Result{}, err
 								}
@@ -197,8 +193,13 @@ func (r *ServiceReconciler) reconcileNormal(ctx context.Context, service *netgua
 
 				// Add the service if it's not already there
 				if !serviceAlreadyAdded {
+					// Create a copy for patching
+					original := updatedPortMapping.DeepCopy()
 					updatedPortMapping.AccessPorts.Items = append(updatedPortMapping.AccessPorts.Items, servicePortsRef)
-					if err := r.Update(ctx, updatedPortMapping); err != nil {
+
+					// Apply patch with retry
+					patch := client.MergeFrom(original)
+					if err := PatchWithRetry(ctx, r.Client, updatedPortMapping, patch, DefaultMaxRetries); err != nil {
 						logger.Error(err, "Failed to add Service to AddressGroupPortMapping.AccessPorts")
 						return ctrl.Result{}, err
 					}
@@ -278,11 +279,15 @@ func (r *ServiceReconciler) reconcileDelete(ctx context.Context, service *netgua
 					if updatedSp.GetName() == service.GetName() &&
 						updatedSp.GetNamespace() == service.GetNamespace() {
 						// Remove the item from the slice
+						// Create a copy for patching
+						original := updatedPortMapping.DeepCopy()
 						updatedPortMapping.AccessPorts.Items = append(
 							updatedPortMapping.AccessPorts.Items[:j],
 							updatedPortMapping.AccessPorts.Items[j+1:]...)
 
-						if err := r.Update(ctx, updatedPortMapping); err != nil {
+						// Apply patch with retry
+						patch := client.MergeFrom(original)
+						if err := PatchWithRetry(ctx, r.Client, updatedPortMapping, patch, DefaultMaxRetries); err != nil {
 							logger.Error(err, "Failed to remove Service from AddressGroupPortMapping.AccessPorts")
 							return ctrl.Result{}, err
 						}
@@ -316,9 +321,8 @@ func (r *ServiceReconciler) reconcileDelete(ctx context.Context, service *netgua
 		return ctrl.Result{}, err
 	}
 
-	// Remove finalizer from the updated service
-	controllerutil.RemoveFinalizer(updatedService, finalizer)
-	if err := r.Update(ctx, updatedService); err != nil {
+	// Remove finalizer with retry
+	if err := RemoveFinalizer(ctx, r.Client, updatedService, finalizer); err != nil {
 		logger.Error(err, "Failed to remove finalizer from Service")
 		return ctrl.Result{}, err
 	}

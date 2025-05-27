@@ -326,10 +326,15 @@ func (r *RuleS2SReconciler) createOrUpdateIEAgAgRule(
 	var ruleNamespace string
 	if ruleS2S.Spec.Traffic == "ingress" {
 		// For ingress, rule goes in the local AG namespace (receiver)
-		ruleNamespace = localAG.ResolveNamespace(localAG.GetNamespace())
+		ruleNamespace = localAG.ResolveNamespace(ruleS2S.GetNamespace())
 	} else {
 		// For egress, rule goes in the target AG namespace (receiver)
-		ruleNamespace = targetAG.ResolveNamespace(targetAG.GetNamespace())
+		ruleNamespace = targetAG.ResolveNamespace(ruleS2S.GetNamespace())
+	}
+
+	// Ensure namespace is not empty
+	if ruleNamespace == "" {
+		return "", fmt.Errorf("cannot create rule with empty namespace")
 	}
 
 	// Generate rule name using the helper function
@@ -339,6 +344,8 @@ func (r *RuleS2SReconciler) createOrUpdateIEAgAgRule(
 		localAG.Name,
 		targetAG.Name,
 		string(protocol))
+
+	r.Log.Info("Creating rule", "namespace", ruleNamespace, "ruleName", ruleName, "traffic", ruleS2S.Spec.Traffic)
 
 	// Define the rule spec
 	ruleSpec := providerv1alpha1.IEAgAgRuleSpec{
