@@ -21,6 +21,7 @@ import (
 	"reflect"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -75,7 +76,12 @@ func (r *ServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			logger.Error(err, "Failed to add finalizer to Service")
 			return ctrl.Result{}, err
 		}
-		return ctrl.Result{}, nil // Requeue to continue reconciliation
+		// Get the updated service after adding the finalizer
+		if err := r.Get(ctx, req.NamespacedName, service); err != nil {
+			logger.Error(err, "Failed to get updated Service")
+			return ctrl.Result{}, err
+		}
+		// Continue processing without requeue
 	}
 
 	// Check if the resource is being deleted
@@ -91,12 +97,14 @@ func (r *ServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 func (r *ServiceReconciler) reconcileNormal(ctx context.Context, service *netguardv1alpha1.Service) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	// Update status to Ready
-	setServiceCondition(service, netguardv1alpha1.ConditionReady, metav1.ConditionTrue, "ServiceCreated",
-		"Service successfully created")
-	if err := r.Status().Update(ctx, service); err != nil {
-		logger.Error(err, "Failed to update Service status")
-		return ctrl.Result{}, err
+	// Update status to Ready only if it's not already set
+	if !meta.IsStatusConditionTrue(service.Status.Conditions, netguardv1alpha1.ConditionReady) {
+		setServiceCondition(service, netguardv1alpha1.ConditionReady, metav1.ConditionTrue, "ServiceCreated",
+			"Service successfully created")
+		if err := r.Status().Update(ctx, service); err != nil {
+			logger.Error(err, "Failed to update Service status")
+			return ctrl.Result{}, err
+		}
 	}
 
 	// If the service has ports and is bound to AddressGroups, update the port mappings
@@ -135,19 +143,33 @@ func (r *ServiceReconciler) reconcileNormal(ctx context.Context, service *netgua
 
 			// Check if the service is already in the port mapping
 			serviceFound := false
-			for i, sp := range portMapping.AccessPorts.Items {
+			for _, sp := range portMapping.AccessPorts.Items {
 				if sp.GetName() == service.GetName() &&
 					sp.GetNamespace() == service.GetNamespace() {
 					// Update ports if they've changed
 					if !reflect.DeepEqual(sp.Ports, servicePortsRef.Ports) {
-						portMapping.AccessPorts.Items[i].Ports = servicePortsRef.Ports
-						if err := r.Update(ctx, portMapping); err != nil {
-							logger.Error(err, "Failed to update AddressGroupPortMapping.AccessPorts")
+						// Get the latest version of the port mapping before updating
+						updatedPortMapping := &netguardv1alpha1.AddressGroupPortMapping{}
+						if err := r.Get(ctx, portMappingKey, updatedPortMapping); err != nil {
+							logger.Error(err, "Failed to get latest AddressGroupPortMapping")
 							return ctrl.Result{}, err
 						}
-						logger.Info("Updated Service ports in AddressGroupPortMapping",
-							"service", service.GetName(),
-							"addressGroup", addressGroupRef.GetName())
+
+						// Find the service in the updated port mapping
+						for j, updatedSp := range updatedPortMapping.AccessPorts.Items {
+							if updatedSp.GetName() == service.GetName() &&
+								updatedSp.GetNamespace() == service.GetNamespace() {
+								updatedPortMapping.AccessPorts.Items[j].Ports = servicePortsRef.Ports
+								if err := r.Update(ctx, updatedPortMapping); err != nil {
+									logger.Error(err, "Failed to update AddressGroupPortMapping.AccessPorts")
+									return ctrl.Result{}, err
+								}
+								logger.Info("Updated Service ports in AddressGroupPortMapping",
+									"service", service.GetName(),
+									"addressGroup", addressGroupRef.GetName())
+								break
+							}
+						}
 					}
 					serviceFound = true
 					break
@@ -156,14 +178,34 @@ func (r *ServiceReconciler) reconcileNormal(ctx context.Context, service *netgua
 
 			// If the service is not in the port mapping, add it
 			if !serviceFound {
-				portMapping.AccessPorts.Items = append(portMapping.AccessPorts.Items, servicePortsRef)
-				if err := r.Update(ctx, portMapping); err != nil {
-					logger.Error(err, "Failed to add Service to AddressGroupPortMapping.AccessPorts")
+				// Get the latest version of the port mapping before updating
+				updatedPortMapping := &netguardv1alpha1.AddressGroupPortMapping{}
+				if err := r.Get(ctx, portMappingKey, updatedPortMapping); err != nil {
+					logger.Error(err, "Failed to get latest AddressGroupPortMapping")
 					return ctrl.Result{}, err
 				}
-				logger.Info("Added Service to AddressGroupPortMapping.AccessPorts",
-					"service", service.GetName(),
-					"addressGroup", addressGroupRef.GetName())
+
+				// Check if the service is already in the updated port mapping
+				serviceAlreadyAdded := false
+				for _, updatedSp := range updatedPortMapping.AccessPorts.Items {
+					if updatedSp.GetName() == service.GetName() &&
+						updatedSp.GetNamespace() == service.GetNamespace() {
+						serviceAlreadyAdded = true
+						break
+					}
+				}
+
+				// Add the service if it's not already there
+				if !serviceAlreadyAdded {
+					updatedPortMapping.AccessPorts.Items = append(updatedPortMapping.AccessPorts.Items, servicePortsRef)
+					if err := r.Update(ctx, updatedPortMapping); err != nil {
+						logger.Error(err, "Failed to add Service to AddressGroupPortMapping.AccessPorts")
+						return ctrl.Result{}, err
+					}
+					logger.Info("Added Service to AddressGroupPortMapping.AccessPorts",
+						"service", service.GetName(),
+						"addressGroup", addressGroupRef.GetName())
+				}
 			}
 		}
 	}
@@ -216,29 +258,67 @@ func (r *ServiceReconciler) reconcileDelete(ctx context.Context, service *netgua
 		}
 
 		// Remove the Service from the port mapping
-		for i, sp := range portMapping.AccessPorts.Items {
+		for _, sp := range portMapping.AccessPorts.Items {
 			if sp.GetName() == service.GetName() &&
 				sp.GetNamespace() == service.GetNamespace() {
-				// Remove the item from the slice
-				portMapping.AccessPorts.Items = append(
-					portMapping.AccessPorts.Items[:i],
-					portMapping.AccessPorts.Items[i+1:]...)
-
-				if err := r.Update(ctx, portMapping); err != nil {
-					logger.Error(err, "Failed to remove Service from AddressGroupPortMapping.AccessPorts")
+				// Get the latest version of the port mapping before updating
+				updatedPortMapping := &netguardv1alpha1.AddressGroupPortMapping{}
+				if err := r.Get(ctx, portMappingKey, updatedPortMapping); err != nil {
+					if apierrors.IsNotFound(err) {
+						// Port mapping no longer exists, nothing to do
+						break
+					}
+					logger.Error(err, "Failed to get latest AddressGroupPortMapping")
 					return ctrl.Result{}, err
 				}
-				logger.Info("Removed Service from AddressGroupPortMapping.AccessPorts",
-					"service", service.GetName(),
-					"addressGroup", addressGroupRef.GetName())
+
+				// Find the service in the updated port mapping
+				serviceFound := false
+				for j, updatedSp := range updatedPortMapping.AccessPorts.Items {
+					if updatedSp.GetName() == service.GetName() &&
+						updatedSp.GetNamespace() == service.GetNamespace() {
+						// Remove the item from the slice
+						updatedPortMapping.AccessPorts.Items = append(
+							updatedPortMapping.AccessPorts.Items[:j],
+							updatedPortMapping.AccessPorts.Items[j+1:]...)
+
+						if err := r.Update(ctx, updatedPortMapping); err != nil {
+							logger.Error(err, "Failed to remove Service from AddressGroupPortMapping.AccessPorts")
+							return ctrl.Result{}, err
+						}
+						logger.Info("Removed Service from AddressGroupPortMapping.AccessPorts",
+							"service", service.GetName(),
+							"addressGroup", addressGroupRef.GetName())
+						serviceFound = true
+						break
+					}
+				}
+
+				// If service not found in the updated port mapping, it's already been removed
+				if !serviceFound {
+					logger.Info("Service already removed from AddressGroupPortMapping.AccessPorts",
+						"service", service.GetName(),
+						"addressGroup", addressGroupRef.GetName())
+				}
 				break
 			}
 		}
 	}
 
-	// 4. Remove finalizer
-	controllerutil.RemoveFinalizer(service, finalizer)
-	if err := r.Update(ctx, service); err != nil {
+	// 4. Get the latest version of the service before removing finalizer
+	updatedService := &netguardv1alpha1.Service{}
+	if err := r.Get(ctx, types.NamespacedName{Name: service.Name, Namespace: service.Namespace}, updatedService); err != nil {
+		if apierrors.IsNotFound(err) {
+			// Resource already deleted, nothing to do
+			return ctrl.Result{}, nil
+		}
+		logger.Error(err, "Failed to get updated Service")
+		return ctrl.Result{}, err
+	}
+
+	// Remove finalizer from the updated service
+	controllerutil.RemoveFinalizer(updatedService, finalizer)
+	if err := r.Update(ctx, updatedService); err != nil {
 		logger.Error(err, "Failed to remove finalizer from Service")
 		return ctrl.Result{}, err
 	}

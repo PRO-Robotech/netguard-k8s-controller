@@ -32,7 +32,7 @@ import (
 
 const (
 	// DefaultMaxRetries is the default number of retries for operations
-	DefaultMaxRetries = 3
+	DefaultMaxRetries = 5
 
 	// DefaultRetryInterval is the default interval between retries
 	DefaultRetryInterval = 100 * time.Millisecond
@@ -69,8 +69,9 @@ func UpdateWithRetry(ctx context.Context, c client.Client, obj client.Object, ma
 			"attempt", i+1,
 			"maxRetries", maxRetries)
 
-		// Wait before retrying
-		time.Sleep(DefaultRetryInterval)
+		// Wait before retrying with exponential backoff
+		backoff := DefaultRetryInterval * time.Duration(1<<uint(i))
+		time.Sleep(backoff)
 	}
 
 	return fmt.Errorf("failed to update resource after %d retries", maxRetries)
@@ -98,14 +99,19 @@ func PatchWithRetry(ctx context.Context, c client.Client, obj client.Object, pat
 			return err
 		}
 
+		// We can't directly update the original object since it's an interface
+		// Instead, we'll create a new patch from the latest version
+		patch = client.MergeFrom(latest)
+
 		// Log the conflict and retry
 		logger.Info("Conflict detected, retrying patch",
 			"resource", fmt.Sprintf("%s/%s", namespace, name),
 			"attempt", i+1,
 			"maxRetries", maxRetries)
 
-		// Wait before retrying
-		time.Sleep(DefaultRetryInterval)
+		// Wait before retrying with exponential backoff
+		backoff := DefaultRetryInterval * time.Duration(1<<uint(i))
+		time.Sleep(backoff)
 	}
 
 	return fmt.Errorf("failed to patch resource after %d retries", maxRetries)
@@ -139,8 +145,9 @@ func UpdateStatusWithRetry(ctx context.Context, c client.Client, obj client.Obje
 			"attempt", i+1,
 			"maxRetries", maxRetries)
 
-		// Wait before retrying
-		time.Sleep(DefaultRetryInterval)
+		// Wait before retrying with exponential backoff
+		backoff := DefaultRetryInterval * time.Duration(1<<uint(i))
+		time.Sleep(backoff)
 	}
 
 	return fmt.Errorf("failed to update resource status after %d retries", maxRetries)
@@ -158,7 +165,16 @@ func EnsureFinalizer(ctx context.Context, c client.Client, obj client.Object, fi
 
 	// Apply patch
 	patch := client.MergeFrom(obj)
-	return PatchWithRetry(ctx, c, objCopy, patch, DefaultMaxRetries)
+	err := PatchWithRetry(ctx, c, objCopy, patch, DefaultMaxRetries)
+	if err != nil {
+		return err
+	}
+
+	// Get the latest version of the object to update the caller's reference
+	return c.Get(ctx, types.NamespacedName{
+		Name:      obj.GetName(),
+		Namespace: obj.GetNamespace(),
+	}, obj)
 }
 
 // RemoveFinalizer removes a finalizer from an object
