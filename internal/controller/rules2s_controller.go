@@ -223,10 +223,10 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	var ports []netguardv1alpha1.IngressPort
 	if strings.ToLower(ruleS2S.Spec.Traffic) == "ingress" {
 		// For ingress, local service is the receiver
-		ports = targetService.Spec.IngressPorts
+		ports = localService.Spec.IngressPorts
 	} else {
 		// For egress, target service is the receiver
-		ports = localService.Spec.IngressPorts
+		ports = targetService.Spec.IngressPorts
 	}
 
 	if len(ports) == 0 {
