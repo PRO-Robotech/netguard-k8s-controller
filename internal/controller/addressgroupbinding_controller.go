@@ -258,8 +258,15 @@ func (r *AddressGroupBindingReconciler) reconcileNormal(ctx context.Context, bin
 			sp.GetNamespace() == service.GetNamespace() {
 			// Update ports if they've changed
 			if !reflect.DeepEqual(sp.Ports, servicePortsRef.Ports) {
+				// Create a copy for patching
+				original := portMapping.DeepCopy()
+
+				// Update the ports
 				portMapping.AccessPorts.Items[i].Ports = servicePortsRef.Ports
-				if err := r.Update(ctx, portMapping); err != nil {
+
+				// Apply patch with retry
+				patch := client.MergeFrom(original)
+				if err := PatchWithRetry(ctx, r.Client, portMapping, patch, DefaultMaxRetries); err != nil {
 					logger.Error(err, "Failed to update AddressGroupPortMapping.AccessPorts")
 					return ctrl.Result{}, err
 				}
@@ -273,8 +280,15 @@ func (r *AddressGroupBindingReconciler) reconcileNormal(ctx context.Context, bin
 	}
 
 	if !servicePortsFound {
+		// Create a copy for patching
+		original := portMapping.DeepCopy()
+
+		// Add the service to the list
 		portMapping.AccessPorts.Items = append(portMapping.AccessPorts.Items, servicePortsRef)
-		if err := r.Update(ctx, portMapping); err != nil {
+
+		// Apply patch with retry
+		patch := client.MergeFrom(original)
+		if err := PatchWithRetry(ctx, r.Client, portMapping, patch, DefaultMaxRetries); err != nil {
 			logger.Error(err, "Failed to add Service to AddressGroupPortMapping.AccessPorts")
 			return ctrl.Result{}, err
 		}
@@ -350,12 +364,17 @@ func (r *AddressGroupBindingReconciler) reconcileDelete(ctx context.Context, bin
 		for i, sp := range portMapping.AccessPorts.Items {
 			if sp.GetName() == serviceRef.GetName() &&
 				sp.GetNamespace() == binding.GetNamespace() {
+				// Create a copy for patching
+				original := portMapping.DeepCopy()
+
 				// Remove the item from the slice
 				portMapping.AccessPorts.Items = append(
 					portMapping.AccessPorts.Items[:i],
 					portMapping.AccessPorts.Items[i+1:]...)
 
-				if err := r.Update(ctx, portMapping); err != nil {
+				// Apply patch with retry
+				patch := client.MergeFrom(original)
+				if err := PatchWithRetry(ctx, r.Client, portMapping, patch, DefaultMaxRetries); err != nil {
 					logger.Error(err, "Failed to remove Service from AddressGroupPortMapping.AccessPorts")
 					return ctrl.Result{}, err
 				}
