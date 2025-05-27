@@ -167,42 +167,67 @@ func validatePort(port string) error {
 	return nil
 }
 
-// ValidateNoDuplicatePorts validates that there are no duplicate port configurations in the list
+// ValidateNoDuplicatePorts validates that there are no duplicate or overlapping port configurations in the list
 func ValidateNoDuplicatePorts(ingressPorts []netguardv1alpha1.IngressPort) error {
-	// Create a map to track already seen port+protocol combinations
-	seen := make(map[string]bool)
+	// Create maps to store port ranges by protocol
+	tcpRanges := []PortRange{}
+	udpRanges := []PortRange{}
 
 	for _, port := range ingressPorts {
-		// Create a key from port and protocol
-		key := fmt.Sprintf("%s-%s", port.Port, port.Protocol)
-
-		// Check if this port+protocol combination has already been seen
-		if seen[key] {
-			return fmt.Errorf("duplicate port configuration found: port %s with protocol %s is defined multiple times",
-				port.Port, port.Protocol)
+		// Parse the port string to a PortRange
+		portRange, err := ParsePortRange(port.Port)
+		if err != nil {
+			return fmt.Errorf("invalid port %s: %w", port.Port, err)
 		}
 
-		// Mark this port+protocol combination as seen
-		seen[key] = true
+		// Check for overlaps with existing ports of the same protocol
+		var existingRanges []PortRange
+		if port.Protocol == netguardv1alpha1.ProtocolTCP {
+			existingRanges = tcpRanges
+		} else if port.Protocol == netguardv1alpha1.ProtocolUDP {
+			existingRanges = udpRanges
+		}
+
+		for _, existingRange := range existingRanges {
+			if DoPortRangesOverlap(portRange, existingRange) {
+				return fmt.Errorf("port conflict detected: %s port range %s overlaps with existing port range %d-%d",
+					port.Protocol, port.Port, existingRange.Start, existingRange.End)
+			}
+		}
+
+		// Add this port range to the appropriate map
+		if port.Protocol == netguardv1alpha1.ProtocolTCP {
+			tcpRanges = append(tcpRanges, portRange)
+		} else if port.Protocol == netguardv1alpha1.ProtocolUDP {
+			udpRanges = append(udpRanges, portRange)
+		}
 	}
 
 	return nil
 }
 
-// ValidateNoDuplicatePortsInPortConfig validates that there are no duplicate port configurations in the list
+// ValidateNoDuplicatePortsInPortConfig validates that there are no duplicate or overlapping port configurations in the list
 func ValidateNoDuplicatePortsInPortConfig(ports []netguardv1alpha1.PortConfig) error {
-	// Create a map to track already seen ports
-	seen := make(map[string]bool)
+	// Create a slice to store port ranges
+	ranges := []PortRange{}
 
 	for _, port := range ports {
-		// Check if this port has already been seen
-		if seen[port.Port] {
-			return fmt.Errorf("duplicate port configuration found: port %s is defined multiple times",
-				port.Port)
+		// Parse the port string to a PortRange
+		portRange, err := ParsePortRange(port.Port)
+		if err != nil {
+			return fmt.Errorf("invalid port %s: %w", port.Port, err)
 		}
 
-		// Mark this port as seen
-		seen[port.Port] = true
+		// Check for overlaps with existing ports
+		for _, existingRange := range ranges {
+			if DoPortRangesOverlap(portRange, existingRange) {
+				return fmt.Errorf("port conflict detected: port range %s overlaps with existing port range %d-%d",
+					port.Port, existingRange.Start, existingRange.End)
+			}
+		}
+
+		// Add this port range to the slice
+		ranges = append(ranges, portRange)
 	}
 
 	return nil
