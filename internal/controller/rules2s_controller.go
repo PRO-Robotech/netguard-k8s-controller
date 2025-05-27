@@ -221,12 +221,12 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// Determine which ports to use based on traffic direction
 	// In both cases, we use ports from the service that receives the traffic
 	var ports []netguardv1alpha1.IngressPort
-	if ruleS2S.Spec.Traffic == "ingress" {
+	if strings.ToLower(ruleS2S.Spec.Traffic) == "ingress" {
 		// For ingress, local service is the receiver
-		ports = localService.Spec.IngressPorts
+		ports = targetService.Spec.IngressPorts
 	} else {
 		// For egress, target service is the receiver
-		ports = targetService.Spec.IngressPorts
+		ports = localService.Spec.IngressPorts
 	}
 
 	if len(ports) == 0 {
