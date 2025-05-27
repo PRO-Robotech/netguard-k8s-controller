@@ -166,3 +166,44 @@ func validatePort(port string) error {
 
 	return nil
 }
+
+// ValidateNoDuplicatePorts validates that there are no duplicate port configurations in the list
+func ValidateNoDuplicatePorts(ingressPorts []netguardv1alpha1.IngressPort) error {
+	// Create a map to track already seen port+protocol combinations
+	seen := make(map[string]bool)
+
+	for _, port := range ingressPorts {
+		// Create a key from port and protocol
+		key := fmt.Sprintf("%s-%s", port.Port, port.Protocol)
+
+		// Check if this port+protocol combination has already been seen
+		if seen[key] {
+			return fmt.Errorf("duplicate port configuration found: port %s with protocol %s is defined multiple times",
+				port.Port, port.Protocol)
+		}
+
+		// Mark this port+protocol combination as seen
+		seen[key] = true
+	}
+
+	return nil
+}
+
+// ValidateNoDuplicatePortsInPortConfig validates that there are no duplicate port configurations in the list
+func ValidateNoDuplicatePortsInPortConfig(ports []netguardv1alpha1.PortConfig) error {
+	// Create a map to track already seen ports
+	seen := make(map[string]bool)
+
+	for _, port := range ports {
+		// Check if this port has already been seen
+		if seen[port.Port] {
+			return fmt.Errorf("duplicate port configuration found: port %s is defined multiple times",
+				port.Port)
+		}
+
+		// Mark this port as seen
+		seen[port.Port] = true
+	}
+
+	return nil
+}

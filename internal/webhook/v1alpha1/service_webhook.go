@@ -70,6 +70,11 @@ func (v *ServiceCustomValidator) ValidateCreate(ctx context.Context, obj runtime
 	}
 	servicelog.Info("Validation for Service upon creation", "name", service.GetName())
 
+	// Check for duplicate ports
+	if err := ValidateNoDuplicatePorts(service.Spec.IngressPorts); err != nil {
+		return nil, err
+	}
+
 	// Validate all ports in the service
 	for _, ingressPort := range service.Spec.IngressPorts {
 		if err := ValidatePorts(ingressPort); err != nil {
@@ -96,6 +101,11 @@ func (v *ServiceCustomValidator) ValidateUpdate(ctx context.Context, oldObj, new
 	// Skip validation for resources being deleted
 	if SkipValidationForDeletion(ctx, newService) {
 		return nil, nil
+	}
+
+	// Check for duplicate ports
+	if err := ValidateNoDuplicatePorts(newService.Spec.IngressPorts); err != nil {
+		return nil, err
 	}
 
 	// Validate all ports in the service

@@ -131,6 +131,16 @@ func (v *AddressGroupPortMappingCustomValidator) checkInternalPortOverlaps(portM
 	for _, servicePortRef := range portMapping.AccessPorts.Items {
 		serviceName := servicePortRef.GetName()
 
+		// Check for duplicate TCP ports within the same service
+		if err := ValidateNoDuplicatePortsInPortConfig(servicePortRef.Ports.TCP); err != nil {
+			return fmt.Errorf("service %s: %w", serviceName, err)
+		}
+
+		// Check for duplicate UDP ports within the same service
+		if err := ValidateNoDuplicatePortsInPortConfig(servicePortRef.Ports.UDP); err != nil {
+			return fmt.Errorf("service %s: %w", serviceName, err)
+		}
+
 		// Check TCP ports
 		for _, tcpPort := range servicePortRef.Ports.TCP {
 			portRange, err := ParsePortRange(tcpPort.Port)
