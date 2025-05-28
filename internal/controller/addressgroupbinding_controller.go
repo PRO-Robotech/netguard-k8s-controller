@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strings"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -72,6 +73,36 @@ func (r *AddressGroupBindingReconciler) Reconcile(ctx context.Context, req ctrl.
 		return ctrl.Result{}, err
 	}
 
+	// Log current state of the resource
+	logger.Info("AddressGroupBinding current state",
+		"name", binding.Name,
+		"namespace", binding.Namespace,
+		"deletionTimestamp", binding.DeletionTimestamp,
+		"finalizers", binding.Finalizers,
+		"ownerReferences", formatOwnerReferences(binding.OwnerReferences),
+		"serviceRef", formatObjectReference(binding.Spec.ServiceRef),
+		"addressGroupRef", formatNamespacedObjectReference(binding.Spec.AddressGroupRef),
+		"conditions", formatConditions(binding.Status.Conditions),
+		"generation", binding.Generation,
+		"resourceVersion", binding.ResourceVersion)
+
+	// TEMPORARY-DEBUG-CODE: Detailed logging for problematic resources
+	if binding.Name == "dynamic-2rx8z" || binding.Name == "dynamic-7dls7" ||
+		binding.Name == "dynamic-fb5qw" || binding.Name == "dynamic-g6jfj" ||
+		binding.Name == "dynamic-jd2b7" || binding.Name == "dynamic-lsjlt" {
+
+		logger.Info("TEMPORARY-DEBUG-CODE: Detailed state of problematic binding",
+			"name", binding.Name,
+			"namespace", binding.Namespace,
+			"generation", binding.Generation,
+			"resourceVersion", binding.ResourceVersion,
+			"finalizers", binding.Finalizers,
+			"ownerReferences", formatOwnerReferences(binding.OwnerReferences),
+			"serviceRef", formatObjectReference(binding.Spec.ServiceRef),
+			"addressGroupRef", formatNamespacedObjectReference(binding.Spec.AddressGroupRef),
+			"conditions", formatConditions(binding.Status.Conditions))
+	}
+
 	// Add finalizer if it doesn't exist
 	const finalizer = "addressgroupbinding.netguard.sgroups.io/finalizer"
 	if !controllerutil.ContainsFinalizer(binding, finalizer) {
@@ -95,6 +126,9 @@ func (r *AddressGroupBindingReconciler) Reconcile(ctx context.Context, req ctrl.
 // reconcileNormal handles the normal reconciliation of an AddressGroupBinding
 func (r *AddressGroupBindingReconciler) reconcileNormal(ctx context.Context, binding *netguardv1alpha1.AddressGroupBinding) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
+	logger.Info("Starting normal reconciliation for AddressGroupBinding",
+		"name", binding.Name,
+		"namespace", binding.Namespace)
 
 	// 1. Get the Service
 	serviceRef := binding.Spec.ServiceRef
@@ -103,8 +137,16 @@ func (r *AddressGroupBindingReconciler) reconcileNormal(ctx context.Context, bin
 		Name:      serviceRef.GetName(),
 		Namespace: binding.GetNamespace(), // Service is in the same namespace as the binding
 	}
+	logger.Info("Looking up Service",
+		"serviceName", serviceRef.GetName(),
+		"serviceNamespace", binding.GetNamespace())
+
 	if err := r.Get(ctx, serviceKey, service); err != nil {
 		if apierrors.IsNotFound(err) {
+			logger.Info("Service not found, will requeue after 1 minute",
+				"serviceName", serviceRef.GetName(),
+				"serviceNamespace", binding.GetNamespace())
+
 			// Set condition to indicate that the Service was not found
 			setCondition(binding, netguardv1alpha1.ConditionReady, metav1.ConditionFalse, "ServiceNotFound",
 				fmt.Sprintf("Service %s not found", serviceRef.GetName()))
@@ -118,9 +160,19 @@ func (r *AddressGroupBindingReconciler) reconcileNormal(ctx context.Context, bin
 		return ctrl.Result{}, err
 	}
 
+	logger.Info("Service found",
+		"serviceName", service.Name,
+		"serviceUID", service.UID,
+		"addressGroups", len(service.AddressGroups.Items))
+
 	// 2. Get the AddressGroup
 	addressGroupRef := binding.Spec.AddressGroupRef
 	addressGroupNamespace := v1alpha1.ResolveNamespace(addressGroupRef.GetNamespace(), binding.GetNamespace())
+
+	logger.Info("Looking up AddressGroup",
+		"addressGroupName", addressGroupRef.GetName(),
+		"addressGroupNamespace", addressGroupNamespace,
+		"originalNamespace", addressGroupRef.GetNamespace())
 
 	addressGroup := &providerv1alpha1.AddressGroup{}
 	addressGroupKey := client.ObjectKey{
@@ -129,6 +181,10 @@ func (r *AddressGroupBindingReconciler) reconcileNormal(ctx context.Context, bin
 	}
 	if err := r.Get(ctx, addressGroupKey, addressGroup); err != nil {
 		if apierrors.IsNotFound(err) {
+			logger.Info("AddressGroup not found, will requeue after 1 minute",
+				"addressGroupName", addressGroupRef.GetName(),
+				"addressGroupNamespace", addressGroupNamespace)
+
 			// Set condition to indicate that the AddressGroup was not found
 			setCondition(binding, netguardv1alpha1.ConditionReady, metav1.ConditionFalse, "AddressGroupNotFound",
 				fmt.Sprintf("AddressGroup %s not found in namespace %s", addressGroupRef.GetName(), addressGroupNamespace))
@@ -142,14 +198,28 @@ func (r *AddressGroupBindingReconciler) reconcileNormal(ctx context.Context, bin
 		return ctrl.Result{}, err
 	}
 
+	logger.Info("AddressGroup found",
+		"addressGroupName", addressGroup.Name,
+		"addressGroupUID", addressGroup.UID,
+		"addressGroupNamespace", addressGroup.Namespace)
+
 	// 2.1 Get the AddressGroupPortMapping for port information
 	portMapping := &netguardv1alpha1.AddressGroupPortMapping{}
 	portMappingKey := client.ObjectKey{
 		Name:      addressGroupRef.GetName(), // Port mapping has the same name as the address group
 		Namespace: addressGroupNamespace,
 	}
+
+	logger.Info("Looking up AddressGroupPortMapping",
+		"portMappingName", portMappingKey.Name,
+		"portMappingNamespace", portMappingKey.Namespace)
+
 	if err := r.Get(ctx, portMappingKey, portMapping); err != nil {
 		if apierrors.IsNotFound(err) {
+			logger.Info("AddressGroupPortMapping not found, creating a new one",
+				"portMappingName", portMappingKey.Name,
+				"portMappingNamespace", portMappingKey.Namespace)
+
 			// Create a new AddressGroupPortMapping if it doesn't exist
 			portMapping = &netguardv1alpha1.AddressGroupPortMapping{
 				ObjectMeta: metav1.ObjectMeta{
@@ -172,14 +242,25 @@ func (r *AddressGroupBindingReconciler) reconcileNormal(ctx context.Context, bin
 				logger.Error(err, "Failed to create AddressGroupPortMapping")
 				return ctrl.Result{}, err
 			}
-			logger.Info("Created new AddressGroupPortMapping", "name", portMapping.GetName(), "namespace", portMapping.GetNamespace())
+			logger.Info("Created new AddressGroupPortMapping",
+				"name", portMapping.GetName(),
+				"namespace", portMapping.GetNamespace(),
+				"ownerReference", formatOwnerReferences(portMapping.OwnerReferences))
 		} else {
 			logger.Error(err, "Failed to get AddressGroupPortMapping")
 			return ctrl.Result{}, err
 		}
+	} else {
+		logger.Info("AddressGroupPortMapping found",
+			"name", portMapping.GetName(),
+			"namespace", portMapping.GetNamespace(),
+			"servicePortsCount", len(portMapping.AccessPorts.Items))
 	}
 
 	// Add OwnerReferences to the binding for Service and AddressGroup
+	logger.Info("Checking owner references",
+		"currentOwnerRefs", formatOwnerReferences(binding.OwnerReferences))
+
 	ownerRefsUpdated := false
 
 	// Add OwnerReference to Service
@@ -192,6 +273,10 @@ func (r *AddressGroupBindingReconciler) reconcileNormal(ctx context.Context, bin
 		Controller:         pointer.Bool(false),
 	}
 	if !containsOwnerReference(binding.GetOwnerReferences(), serviceOwnerRef) {
+		logger.Info("Adding Service owner reference",
+			"service", fmt.Sprintf("%s/%s", service.Kind, service.Name),
+			"serviceUID", service.UID)
+
 		binding.OwnerReferences = append(binding.OwnerReferences, serviceOwnerRef)
 		ownerRefsUpdated = true
 	}
@@ -206,40 +291,64 @@ func (r *AddressGroupBindingReconciler) reconcileNormal(ctx context.Context, bin
 		Controller:         pointer.Bool(false),
 	}
 	if !containsOwnerReference(binding.GetOwnerReferences(), agOwnerRef) {
+		logger.Info("Adding AddressGroup owner reference",
+			"addressGroup", fmt.Sprintf("%s/%s", addressGroup.Kind, addressGroup.Name),
+			"addressGroupUID", addressGroup.UID)
+
 		binding.OwnerReferences = append(binding.OwnerReferences, agOwnerRef)
 		ownerRefsUpdated = true
 	}
 
 	// If owner references were updated, update the binding
 	if ownerRefsUpdated {
+		logger.Info("Updating binding with new owner references",
+			"updatedOwnerRefs", formatOwnerReferences(binding.OwnerReferences))
+
 		if err := UpdateWithRetry(ctx, r.Client, binding, DefaultMaxRetries); err != nil {
 			logger.Error(err, "Failed to update AddressGroupBinding with owner references")
 			return ctrl.Result{}, err
 		}
+		logger.Info("Successfully updated binding with owner references")
+	} else {
+		logger.Info("No owner reference updates needed")
 	}
 
 	// 3. Update Service.AddressGroups
+	logger.Info("Checking if AddressGroup is already in Service.AddressGroups",
+		"serviceAddressGroupsCount", len(service.AddressGroups.Items),
+		"addressGroupToAdd", formatNamespacedObjectReference(addressGroupRef))
+
 	addressGroupFound := false
 	for _, ag := range service.AddressGroups.Items {
 		if ag.GetName() == addressGroupRef.GetName() &&
 			ag.GetNamespace() == addressGroupRef.GetNamespace() {
+			logger.Info("AddressGroup already exists in Service.AddressGroups",
+				"addressGroup", formatNamespacedObjectReference(ag))
 			addressGroupFound = true
 			break
 		}
 	}
 
 	if !addressGroupFound {
+		logger.Info("AddressGroup not found in Service.AddressGroups, adding it",
+			"addressGroup", formatNamespacedObjectReference(addressGroupRef))
+
 		service.AddressGroups.Items = append(service.AddressGroups.Items, addressGroupRef)
 		if err := UpdateWithRetry(ctx, r.Client, service, DefaultMaxRetries); err != nil {
 			logger.Error(err, "Failed to update Service.AddressGroups")
 			return ctrl.Result{}, err
 		}
-		logger.Info("Added AddressGroup to Service.AddressGroups",
+		logger.Info("Successfully added AddressGroup to Service.AddressGroups",
 			"service", service.GetName(),
-			"addressGroup", addressGroupRef.GetName())
+			"addressGroup", addressGroupRef.GetName(),
+			"updatedAddressGroupsCount", len(service.AddressGroups.Items))
+	} else {
+		logger.Info("No Service.AddressGroups update needed")
 	}
 
 	// 4. Update AddressGroupPortMapping.AccessPorts
+	logger.Info("Preparing to update AddressGroupPortMapping.AccessPorts")
+
 	servicePortsRef := netguardv1alpha1.ServicePortsRef{
 		NamespacedObjectReference: netguardv1alpha1.NamespacedObjectReference{
 			ObjectReference: netguardv1alpha1.ObjectReference{
@@ -252,12 +361,21 @@ func (r *AddressGroupBindingReconciler) reconcileNormal(ctx context.Context, bin
 		Ports: v1alpha1.ConvertIngressPortsToProtocolPorts(service.Spec.IngressPorts),
 	}
 
+	logger.Info("Created ServicePortsRef",
+		"service", fmt.Sprintf("%s/%s", service.GetNamespace(), service.GetName()))
+
 	servicePortsFound := false
 	for i, sp := range portMapping.AccessPorts.Items {
 		if sp.GetName() == service.GetName() &&
 			sp.GetNamespace() == service.GetNamespace() {
+			logger.Info("Found existing ServicePortsRef in AddressGroupPortMapping",
+				"service", fmt.Sprintf("%s/%s", sp.GetNamespace(), sp.GetName()))
+
 			// Update ports if they've changed
 			if !reflect.DeepEqual(sp.Ports, servicePortsRef.Ports) {
+				logger.Info("Ports have changed, updating ServicePortsRef",
+					"service", fmt.Sprintf("%s/%s", sp.GetNamespace(), sp.GetName()))
+
 				// Create a copy for patching
 				original := portMapping.DeepCopy()
 
@@ -270,9 +388,11 @@ func (r *AddressGroupBindingReconciler) reconcileNormal(ctx context.Context, bin
 					logger.Error(err, "Failed to update AddressGroupPortMapping.AccessPorts")
 					return ctrl.Result{}, err
 				}
-				logger.Info("Updated Service ports in AddressGroupPortMapping",
+				logger.Info("Successfully updated Service ports in AddressGroupPortMapping",
 					"service", service.GetName(),
 					"addressGroup", addressGroupRef.GetName())
+			} else {
+				logger.Info("Ports have not changed, no update needed")
 			}
 			servicePortsFound = true
 			break
@@ -280,6 +400,10 @@ func (r *AddressGroupBindingReconciler) reconcileNormal(ctx context.Context, bin
 	}
 
 	if !servicePortsFound {
+		logger.Info("Service not found in AddressGroupPortMapping.AccessPorts, adding it",
+			"service", fmt.Sprintf("%s/%s", service.GetNamespace(), service.GetName()),
+			"currentItemsCount", len(portMapping.AccessPorts.Items))
+
 		// Create a copy for patching
 		original := portMapping.DeepCopy()
 
@@ -292,27 +416,76 @@ func (r *AddressGroupBindingReconciler) reconcileNormal(ctx context.Context, bin
 			logger.Error(err, "Failed to add Service to AddressGroupPortMapping.AccessPorts")
 			return ctrl.Result{}, err
 		}
-		logger.Info("Added Service to AddressGroupPortMapping.AccessPorts",
+		logger.Info("Successfully added Service to AddressGroupPortMapping.AccessPorts",
 			"service", service.GetName(),
-			"addressGroup", addressGroupRef.GetName())
+			"addressGroup", addressGroupRef.GetName(),
+			"updatedItemsCount", len(portMapping.AccessPorts.Items))
 	}
 
 	// 5. Update status
+	logger.Info("Updating AddressGroupBinding status to Ready")
+
 	setCondition(binding, netguardv1alpha1.ConditionReady, metav1.ConditionTrue, "BindingCreated",
 		"AddressGroupBinding successfully created")
+
+	// Log the updated conditions before saving
+	logger.Info("Updated conditions",
+		"conditions", formatConditions(binding.Status.Conditions))
+
 	if err := UpdateStatusWithRetry(ctx, r.Client, binding, DefaultMaxRetries); err != nil {
 		logger.Error(err, "Failed to update AddressGroupBinding status")
 		return ctrl.Result{}, err
 	}
 
-	logger.Info("AddressGroupBinding reconciled successfully")
+	logger.Info("AddressGroupBinding reconciled successfully",
+		"name", binding.Name,
+		"namespace", binding.Namespace,
+		"generation", binding.Generation,
+		"resourceVersion", binding.ResourceVersion)
+
+	// TEMPORARY-DEBUG-CODE: Final state logging for problematic resources
+	if binding.Name == "dynamic-2rx8z" || binding.Name == "dynamic-7dls7" ||
+		binding.Name == "dynamic-fb5qw" || binding.Name == "dynamic-g6jfj" ||
+		binding.Name == "dynamic-jd2b7" || binding.Name == "dynamic-lsjlt" {
+
+		logger.Info("TEMPORARY-DEBUG-CODE: Final state of problematic binding after successful reconciliation",
+			"name", binding.Name,
+			"namespace", binding.Namespace,
+			"generation", binding.Generation,
+			"resourceVersion", binding.ResourceVersion,
+			"finalizers", binding.Finalizers,
+			"ownerReferences", formatOwnerReferences(binding.OwnerReferences),
+			"conditions", formatConditions(binding.Status.Conditions))
+	}
+
 	return ctrl.Result{}, nil
 }
 
 // reconcileDelete handles the deletion of an AddressGroupBinding
 func (r *AddressGroupBindingReconciler) reconcileDelete(ctx context.Context, binding *netguardv1alpha1.AddressGroupBinding, finalizer string) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
-	logger.Info("Deleting AddressGroupBinding", "name", binding.GetName())
+	logger.Info("Deleting AddressGroupBinding",
+		"name", binding.GetName(),
+		"namespace", binding.GetNamespace(),
+		"finalizers", binding.Finalizers,
+		"conditions", formatConditions(binding.Status.Conditions))
+
+	// TEMPORARY-DEBUG-CODE: Detailed logging for problematic resources being deleted
+	if binding.Name == "dynamic-2rx8z" || binding.Name == "dynamic-7dls7" ||
+		binding.Name == "dynamic-fb5qw" || binding.Name == "dynamic-g6jfj" ||
+		binding.Name == "dynamic-jd2b7" || binding.Name == "dynamic-lsjlt" {
+
+		logger.Info("TEMPORARY-DEBUG-CODE: Detailed state of problematic binding being deleted",
+			"name", binding.Name,
+			"namespace", binding.Namespace,
+			"generation", binding.Generation,
+			"resourceVersion", binding.ResourceVersion,
+			"finalizers", binding.Finalizers,
+			"ownerReferences", formatOwnerReferences(binding.OwnerReferences),
+			"serviceRef", formatObjectReference(binding.Spec.ServiceRef),
+			"addressGroupRef", formatNamespacedObjectReference(binding.Spec.AddressGroupRef),
+			"conditions", formatConditions(binding.Status.Conditions))
+	}
 
 	// 1. Remove AddressGroup from Service.AddressGroups
 	serviceRef := binding.Spec.ServiceRef
@@ -322,13 +495,29 @@ func (r *AddressGroupBindingReconciler) reconcileDelete(ctx context.Context, bin
 		Namespace: binding.GetNamespace(),
 	}
 
+	logger.Info("Looking up Service for deletion cleanup",
+		"serviceName", serviceRef.GetName(),
+		"serviceNamespace", binding.GetNamespace())
+
 	err := r.Get(ctx, serviceKey, service)
 	if err == nil {
+		logger.Info("Service found, checking for AddressGroup to remove",
+			"serviceName", service.GetName(),
+			"serviceUID", service.UID,
+			"addressGroupsCount", len(service.AddressGroups.Items))
+
 		// Service exists, remove AddressGroup from its list
 		addressGroupRef := binding.Spec.AddressGroupRef
+		addressGroupFound := false
+
 		for i, ag := range service.AddressGroups.Items {
 			if ag.GetName() == addressGroupRef.GetName() &&
 				ag.GetNamespace() == addressGroupRef.GetNamespace() {
+				addressGroupFound = true
+				logger.Info("Found AddressGroup in Service.AddressGroups, removing it",
+					"addressGroup", formatNamespacedObjectReference(ag),
+					"index", i)
+
 				// Remove the item from the slice
 				service.AddressGroups.Items = append(
 					service.AddressGroups.Items[:i],
@@ -338,13 +527,23 @@ func (r *AddressGroupBindingReconciler) reconcileDelete(ctx context.Context, bin
 					logger.Error(err, "Failed to remove AddressGroup from Service.AddressGroups")
 					return ctrl.Result{}, err
 				}
-				logger.Info("Removed AddressGroup from Service.AddressGroups",
+				logger.Info("Successfully removed AddressGroup from Service.AddressGroups",
 					"service", service.GetName(),
-					"addressGroup", addressGroupRef.GetName())
+					"addressGroup", addressGroupRef.GetName(),
+					"remainingAddressGroups", len(service.AddressGroups.Items))
 				break
 			}
 		}
-	} else if !apierrors.IsNotFound(err) {
+
+		if !addressGroupFound {
+			logger.Info("AddressGroup not found in Service.AddressGroups, nothing to remove",
+				"addressGroup", formatNamespacedObjectReference(addressGroupRef))
+		}
+	} else if apierrors.IsNotFound(err) {
+		// Service not found
+		logger.Info("Service not found, skipping Service.AddressGroups cleanup",
+			"serviceName", serviceRef.GetName())
+	} else {
 		// Error other than "not found"
 		logger.Error(err, "Failed to get Service")
 		return ctrl.Result{}, err
@@ -352,18 +551,37 @@ func (r *AddressGroupBindingReconciler) reconcileDelete(ctx context.Context, bin
 
 	// 2. Remove Service from AddressGroupPortMapping.AccessPorts
 	addressGroupRef := binding.Spec.AddressGroupRef
+	addressGroupNamespace := v1alpha1.ResolveNamespace(addressGroupRef.GetNamespace(), binding.GetNamespace())
+
 	portMapping := &netguardv1alpha1.AddressGroupPortMapping{}
 	portMappingKey := client.ObjectKey{
 		Name:      addressGroupRef.GetName(),
-		Namespace: v1alpha1.ResolveNamespace(addressGroupRef.GetNamespace(), binding.GetNamespace()),
+		Namespace: addressGroupNamespace,
 	}
+
+	logger.Info("Looking up AddressGroupPortMapping for deletion cleanup",
+		"portMappingName", portMappingKey.Name,
+		"portMappingNamespace", portMappingKey.Namespace,
+		"originalNamespace", addressGroupRef.GetNamespace())
 
 	err = r.Get(ctx, portMappingKey, portMapping)
 	if err == nil {
+		logger.Info("AddressGroupPortMapping found, checking for Service to remove",
+			"portMappingName", portMapping.GetName(),
+			"portMappingNamespace", portMapping.GetNamespace(),
+			"servicePortsCount", len(portMapping.AccessPorts.Items))
+
 		// PortMapping exists, remove Service from its list
+		serviceFound := false
+
 		for i, sp := range portMapping.AccessPorts.Items {
 			if sp.GetName() == serviceRef.GetName() &&
 				sp.GetNamespace() == binding.GetNamespace() {
+				serviceFound = true
+				logger.Info("Found Service in AddressGroupPortMapping.AccessPorts, removing it",
+					"service", fmt.Sprintf("%s/%s", sp.GetNamespace(), sp.GetName()),
+					"index", i)
+
 				// Create a copy for patching
 				original := portMapping.DeepCopy()
 
@@ -378,26 +596,58 @@ func (r *AddressGroupBindingReconciler) reconcileDelete(ctx context.Context, bin
 					logger.Error(err, "Failed to remove Service from AddressGroupPortMapping.AccessPorts")
 					return ctrl.Result{}, err
 				}
-				logger.Info("Removed Service from AddressGroupPortMapping.AccessPorts",
+				logger.Info("Successfully removed Service from AddressGroupPortMapping.AccessPorts",
 					"service", serviceRef.GetName(),
-					"addressGroup", addressGroupRef.GetName())
+					"addressGroup", addressGroupRef.GetName(),
+					"remainingServicePorts", len(portMapping.AccessPorts.Items))
 				break
 			}
 		}
-	} else if !apierrors.IsNotFound(err) {
+
+		if !serviceFound {
+			logger.Info("Service not found in AddressGroupPortMapping.AccessPorts, nothing to remove",
+				"service", fmt.Sprintf("%s/%s", binding.GetNamespace(), serviceRef.GetName()))
+		}
+	} else if apierrors.IsNotFound(err) {
+		// PortMapping not found
+		logger.Info("AddressGroupPortMapping not found, skipping AccessPorts cleanup",
+			"portMappingName", portMappingKey.Name,
+			"portMappingNamespace", portMappingKey.Namespace)
+	} else {
 		// Error other than "not found"
 		logger.Error(err, "Failed to get AddressGroupPortMapping")
 		return ctrl.Result{}, err
 	}
 
 	// 3. Remove finalizer
+	logger.Info("Removing finalizer",
+		"name", binding.GetName(),
+		"finalizer", finalizer,
+		"currentFinalizers", binding.Finalizers)
+
 	controllerutil.RemoveFinalizer(binding, finalizer)
 	if err := UpdateWithRetry(ctx, r.Client, binding, DefaultMaxRetries); err != nil {
 		logger.Error(err, "Failed to remove finalizer from AddressGroupBinding")
 		return ctrl.Result{}, err
 	}
 
-	logger.Info("AddressGroupBinding deleted successfully")
+	logger.Info("AddressGroupBinding deleted successfully",
+		"name", binding.GetName(),
+		"namespace", binding.GetNamespace())
+
+	// TEMPORARY-DEBUG-CODE: Final state logging for problematic resources being deleted
+	if binding.Name == "dynamic-2rx8z" || binding.Name == "dynamic-7dls7" ||
+		binding.Name == "dynamic-fb5qw" || binding.Name == "dynamic-g6jfj" ||
+		binding.Name == "dynamic-jd2b7" || binding.Name == "dynamic-lsjlt" {
+
+		logger.Info("TEMPORARY-DEBUG-CODE: Final state of problematic binding after successful deletion",
+			"name", binding.Name,
+			"namespace", binding.Namespace,
+			"generation", binding.Generation,
+			"resourceVersion", binding.ResourceVersion,
+			"finalizers", binding.Finalizers)
+	}
+
 	return ctrl.Result{}, nil
 }
 
@@ -435,6 +685,34 @@ func containsOwnerReference(refs []metav1.OwnerReference, ref metav1.OwnerRefere
 		}
 	}
 	return false
+}
+
+// formatConditions formats a slice of conditions into a readable string
+func formatConditions(conditions []metav1.Condition) string {
+	var result []string
+	for _, c := range conditions {
+		result = append(result, fmt.Sprintf("%s=%s(%s)", c.Type, c.Status, c.Reason))
+	}
+	return strings.Join(result, ", ")
+}
+
+// formatOwnerReferences formats a slice of owner references into a readable string
+func formatOwnerReferences(refs []metav1.OwnerReference) string {
+	var result []string
+	for _, ref := range refs {
+		result = append(result, fmt.Sprintf("%s/%s(%s)", ref.Kind, ref.Name, ref.UID))
+	}
+	return strings.Join(result, ", ")
+}
+
+// formatObjectReference formats an ObjectReference into a readable string
+func formatObjectReference(ref netguardv1alpha1.ObjectReference) string {
+	return fmt.Sprintf("%s/%s/%s", ref.APIVersion, ref.Kind, ref.Name)
+}
+
+// formatNamespacedObjectReference formats a NamespacedObjectReference into a readable string
+func formatNamespacedObjectReference(ref netguardv1alpha1.NamespacedObjectReference) string {
+	return fmt.Sprintf("%s/%s/%s/%s", ref.APIVersion, ref.Kind, ref.GetNamespace(), ref.Name)
 }
 
 // findBindingsForService finds bindings that reference a specific service

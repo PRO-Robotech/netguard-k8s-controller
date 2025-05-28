@@ -68,7 +68,26 @@ func (v *AddressGroupBindingCustomValidator) ValidateCreate(ctx context.Context,
 	if !ok {
 		return nil, fmt.Errorf("expected a AddressGroupBinding object but got %T", obj)
 	}
-	addressgroupbindinglog.Info("Validation for AddressGroupBinding upon creation", "name", binding.GetName())
+
+	// TEMPORARY-DEBUG-CODE: Enhanced logging for problematic resources
+	if binding.Name == "dynamic-2rx8z" || binding.Name == "dynamic-7dls7" ||
+		binding.Name == "dynamic-fb5qw" || binding.Name == "dynamic-g6jfj" ||
+		binding.Name == "dynamic-jd2b7" || binding.Name == "dynamic-lsjlt" {
+
+		addressgroupbindinglog.Info("TEMPORARY-DEBUG-CODE: Detailed validation for problematic AddressGroupBinding creation",
+			"name", binding.Name,
+			"namespace", binding.Namespace,
+			"generation", binding.Generation,
+			"resourceVersion", binding.ResourceVersion,
+			"serviceRef", fmt.Sprintf("%s/%s", binding.Spec.ServiceRef.GetAPIVersion(), binding.Spec.ServiceRef.GetName()),
+			"addressGroupRef", fmt.Sprintf("%s/%s/%s", binding.Spec.AddressGroupRef.GetAPIVersion(),
+				binding.Spec.AddressGroupRef.GetNamespace(), binding.Spec.AddressGroupRef.GetName()))
+	} else {
+		addressgroupbindinglog.Info("Validation for AddressGroupBinding upon creation",
+			"name", binding.GetName(),
+			"namespace", binding.GetNamespace(),
+			"generation", binding.Generation)
+	}
 
 	// 1.1 Validate ServiceRef
 	serviceRef := binding.Spec.ServiceRef
@@ -172,10 +191,36 @@ func (v *AddressGroupBindingCustomValidator) ValidateUpdate(ctx context.Context,
 	if !ok {
 		return nil, fmt.Errorf("expected a AddressGroupBinding object for newObj but got %T", newObj)
 	}
-	addressgroupbindinglog.Info("Validation for AddressGroupBinding upon update", "name", newBinding.GetName())
+
+	// TEMPORARY-DEBUG-CODE: Enhanced logging for problematic resources
+	if newBinding.Name == "dynamic-2rx8z" || newBinding.Name == "dynamic-7dls7" ||
+		newBinding.Name == "dynamic-fb5qw" || newBinding.Name == "dynamic-g6jfj" ||
+		newBinding.Name == "dynamic-jd2b7" || newBinding.Name == "dynamic-lsjlt" {
+
+		addressgroupbindinglog.Info("TEMPORARY-DEBUG-CODE: Detailed validation for problematic AddressGroupBinding",
+			"name", newBinding.Name,
+			"namespace", newBinding.Namespace,
+			"oldGeneration", oldBinding.Generation,
+			"newGeneration", newBinding.Generation,
+			"oldResourceVersion", oldBinding.ResourceVersion,
+			"newResourceVersion", newBinding.ResourceVersion,
+			"oldDeletionTimestamp", oldBinding.DeletionTimestamp,
+			"newDeletionTimestamp", newBinding.DeletionTimestamp,
+			"oldFinalizers", oldBinding.Finalizers,
+			"newFinalizers", newBinding.Finalizers)
+	} else {
+		addressgroupbindinglog.Info("Validation for AddressGroupBinding upon update",
+			"name", newBinding.GetName(),
+			"namespace", newBinding.GetNamespace(),
+			"generation", newBinding.Generation,
+			"resourceVersion", newBinding.ResourceVersion)
+	}
 
 	// Skip validation for resources being deleted
 	if SkipValidationForDeletion(ctx, newBinding) {
+		addressgroupbindinglog.Info("Validation skipped for resource being deleted",
+			"name", newBinding.GetName(),
+			"namespace", newBinding.GetNamespace())
 		return nil, nil
 	}
 
@@ -273,11 +318,29 @@ func (v *AddressGroupBindingCustomValidator) ValidateUpdate(ctx context.Context,
 
 // ValidateDelete implements webhook.CustomValidator so a webhook will be registered for the type AddressGroupBinding.
 func (v *AddressGroupBindingCustomValidator) ValidateDelete(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	addressgroupbinding, ok := obj.(*netguardv1alpha1.AddressGroupBinding)
+	binding, ok := obj.(*netguardv1alpha1.AddressGroupBinding)
 	if !ok {
 		return nil, fmt.Errorf("expected a AddressGroupBinding object but got %T", obj)
 	}
-	addressgroupbindinglog.Info("Validation for AddressGroupBinding upon deletion", "name", addressgroupbinding.GetName())
+
+	// TEMPORARY-DEBUG-CODE: Enhanced logging for problematic resources
+	if binding.Name == "dynamic-2rx8z" || binding.Name == "dynamic-7dls7" ||
+		binding.Name == "dynamic-fb5qw" || binding.Name == "dynamic-g6jfj" ||
+		binding.Name == "dynamic-jd2b7" || binding.Name == "dynamic-lsjlt" {
+
+		addressgroupbindinglog.Info("TEMPORARY-DEBUG-CODE: Detailed validation for problematic AddressGroupBinding deletion",
+			"name", binding.Name,
+			"namespace", binding.Namespace,
+			"generation", binding.Generation,
+			"resourceVersion", binding.ResourceVersion,
+			"deletionTimestamp", binding.DeletionTimestamp,
+			"finalizers", binding.Finalizers)
+	} else {
+		addressgroupbindinglog.Info("Validation for AddressGroupBinding upon deletion",
+			"name", binding.GetName(),
+			"namespace", binding.GetNamespace(),
+			"deletionTimestamp", binding.DeletionTimestamp)
+	}
 
 	// TODO(user): fill in your validation logic upon object deletion.
 

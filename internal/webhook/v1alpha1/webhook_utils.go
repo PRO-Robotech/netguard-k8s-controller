@@ -65,10 +65,34 @@ func ValidateFieldNotChanged(fieldName string, oldValue, newValue interface{}) e
 func SkipValidationForDeletion(ctx context.Context, obj metav1.Object) bool {
 	logger := log.FromContext(ctx)
 
+	// TEMPORARY-DEBUG-CODE: Enhanced logging for problematic resources
+	problematicNames := []string{"dynamic-2rx8z", "dynamic-7dls7", "dynamic-fb5qw", "dynamic-g6jfj", "dynamic-jd2b7", "dynamic-lsjlt"}
+	isProblematic := false
+
+	for _, name := range problematicNames {
+		if obj.GetName() == name {
+			isProblematic = true
+			break
+		}
+	}
+
 	if !obj.GetDeletionTimestamp().IsZero() {
-		logger.Info("skipping validation for resource being deleted", "name", obj.GetName())
+		if isProblematic {
+			logger.Info("TEMPORARY-DEBUG-CODE: Skipping validation for problematic resource being deleted",
+				"name", obj.GetName(),
+				"namespace", obj.GetNamespace(),
+				"deletionTimestamp", obj.GetDeletionTimestamp(),
+				"finalizers", obj.GetFinalizers(),
+				"resourceVersion", obj.GetResourceVersion())
+		} else {
+			logger.Info("Skipping validation for resource being deleted",
+				"name", obj.GetName(),
+				"namespace", obj.GetNamespace(),
+				"deletionTimestamp", obj.GetDeletionTimestamp())
+		}
 		return true
 	}
+
 	return false
 }
 
