@@ -24,6 +24,7 @@ import (
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -181,18 +182,65 @@ func (r *AddressGroupBindingReconciler) reconcileNormal(ctx context.Context, bin
 	}
 	if err := r.Get(ctx, addressGroupKey, addressGroup); err != nil {
 		if apierrors.IsNotFound(err) {
-			logger.Info("AddressGroup not found, will requeue after 1 minute",
+			// Check if we already have a condition for AddressGroupNotFound with the same generation
+			var existingCondition *metav1.Condition
+			for i := range binding.Status.Conditions {
+				if binding.Status.Conditions[i].Type == netguardv1alpha1.ConditionReady &&
+					binding.Status.Conditions[i].Reason == "AddressGroupNotFound" &&
+					binding.Status.Conditions[i].ObservedGeneration == binding.Generation {
+					existingCondition = &binding.Status.Conditions[i]
+					break
+				}
+			}
+
+			// If condition already exists with the same generation, update with detailed message and don't requeue
+			if existingCondition != nil {
+				logger.Info("AddressGroup not found, not requeuing until resource changes",
+					"addressGroupName", addressGroupRef.GetName(),
+					"addressGroupNamespace", addressGroupNamespace)
+
+				// Update the message with more detailed information
+				meta.SetStatusCondition(&binding.Status.Conditions, metav1.Condition{
+					Type:   netguardv1alpha1.ConditionReady,
+					Status: metav1.ConditionFalse,
+					Reason: "AddressGroupNotFound",
+					Message: fmt.Sprintf("AddressGroup %s not found in namespace %s. This binding will not be reconciled until the AddressGroup is created or the resource is modified.",
+						addressGroupRef.GetName(), addressGroupNamespace),
+					ObservedGeneration: binding.Generation,
+					LastTransitionTime: existingCondition.LastTransitionTime,
+				})
+
+				if err := UpdateStatusWithRetry(ctx, r.Client, binding, DefaultMaxRetries); err != nil {
+					logger.Error(err, "Failed to update AddressGroupBinding status")
+					return ctrl.Result{}, err
+				}
+
+				// Don't requeue
+				return ctrl.Result{}, nil
+			}
+
+			// First time seeing this issue or generation changed, set condition and requeue once
+			logger.Info("AddressGroup not found, will requeue once to update status",
 				"addressGroupName", addressGroupRef.GetName(),
 				"addressGroupNamespace", addressGroupNamespace)
 
-			// Set condition to indicate that the AddressGroup was not found
-			setCondition(binding, netguardv1alpha1.ConditionReady, metav1.ConditionFalse, "AddressGroupNotFound",
-				fmt.Sprintf("AddressGroup %s not found in namespace %s", addressGroupRef.GetName(), addressGroupNamespace))
+			meta.SetStatusCondition(&binding.Status.Conditions, metav1.Condition{
+				Type:   netguardv1alpha1.ConditionReady,
+				Status: metav1.ConditionFalse,
+				Reason: "AddressGroupNotFound",
+				Message: fmt.Sprintf("AddressGroup %s not found in namespace %s. This binding will be reconciled once more to update status.",
+					addressGroupRef.GetName(), addressGroupNamespace),
+				ObservedGeneration: binding.Generation,
+				LastTransitionTime: metav1.Now(),
+			})
+
 			if err := UpdateStatusWithRetry(ctx, r.Client, binding, DefaultMaxRetries); err != nil {
 				logger.Error(err, "Failed to update AddressGroupBinding status")
 				return ctrl.Result{}, err
 			}
-			return ctrl.Result{RequeueAfter: time.Minute}, nil
+
+			// Requeue after a short time to update the status with the final message
+			return ctrl.Result{RequeueAfter: time.Second * 5}, nil
 		}
 		logger.Error(err, "Failed to get AddressGroup")
 		return ctrl.Result{}, err
