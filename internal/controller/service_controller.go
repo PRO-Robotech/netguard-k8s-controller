@@ -92,7 +92,7 @@ func (r *ServiceReconciler) reconcileNormal(ctx context.Context, service *netgua
 	if !meta.IsStatusConditionTrue(service.Status.Conditions, netguardv1alpha1.ConditionReady) {
 		setServiceCondition(service, netguardv1alpha1.ConditionReady, metav1.ConditionTrue, "ServiceCreated",
 			"Service successfully created")
-		if err := r.Status().Update(ctx, service); err != nil {
+		if err := UpdateStatusWithRetry(ctx, r.Client, service, DefaultMaxRetries); err != nil {
 			logger.Error(err, "Failed to update Service status")
 			return ctrl.Result{}, err
 		}

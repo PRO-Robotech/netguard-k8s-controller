@@ -76,7 +76,7 @@ func (r *AddressGroupBindingReconciler) Reconcile(ctx context.Context, req ctrl.
 	const finalizer = "addressgroupbinding.netguard.sgroups.io/finalizer"
 	if !controllerutil.ContainsFinalizer(binding, finalizer) {
 		controllerutil.AddFinalizer(binding, finalizer)
-		if err := r.Update(ctx, binding); err != nil {
+		if err := UpdateWithRetry(ctx, r.Client, binding, DefaultMaxRetries); err != nil {
 			logger.Error(err, "Failed to add finalizer to AddressGroupBinding")
 			return ctrl.Result{}, err
 		}
@@ -108,7 +108,7 @@ func (r *AddressGroupBindingReconciler) reconcileNormal(ctx context.Context, bin
 			// Set condition to indicate that the Service was not found
 			setCondition(binding, netguardv1alpha1.ConditionReady, metav1.ConditionFalse, "ServiceNotFound",
 				fmt.Sprintf("Service %s not found", serviceRef.GetName()))
-			if err := r.Status().Update(ctx, binding); err != nil {
+			if err := UpdateStatusWithRetry(ctx, r.Client, binding, DefaultMaxRetries); err != nil {
 				logger.Error(err, "Failed to update AddressGroupBinding status")
 				return ctrl.Result{}, err
 			}
@@ -132,7 +132,7 @@ func (r *AddressGroupBindingReconciler) reconcileNormal(ctx context.Context, bin
 			// Set condition to indicate that the AddressGroup was not found
 			setCondition(binding, netguardv1alpha1.ConditionReady, metav1.ConditionFalse, "AddressGroupNotFound",
 				fmt.Sprintf("AddressGroup %s not found in namespace %s", addressGroupRef.GetName(), addressGroupNamespace))
-			if err := r.Status().Update(ctx, binding); err != nil {
+			if err := UpdateStatusWithRetry(ctx, r.Client, binding, DefaultMaxRetries); err != nil {
 				logger.Error(err, "Failed to update AddressGroupBinding status")
 				return ctrl.Result{}, err
 			}
@@ -212,7 +212,7 @@ func (r *AddressGroupBindingReconciler) reconcileNormal(ctx context.Context, bin
 
 	// If owner references were updated, update the binding
 	if ownerRefsUpdated {
-		if err := r.Update(ctx, binding); err != nil {
+		if err := UpdateWithRetry(ctx, r.Client, binding, DefaultMaxRetries); err != nil {
 			logger.Error(err, "Failed to update AddressGroupBinding with owner references")
 			return ctrl.Result{}, err
 		}
@@ -230,7 +230,7 @@ func (r *AddressGroupBindingReconciler) reconcileNormal(ctx context.Context, bin
 
 	if !addressGroupFound {
 		service.AddressGroups.Items = append(service.AddressGroups.Items, addressGroupRef)
-		if err := r.Update(ctx, service); err != nil {
+		if err := UpdateWithRetry(ctx, r.Client, service, DefaultMaxRetries); err != nil {
 			logger.Error(err, "Failed to update Service.AddressGroups")
 			return ctrl.Result{}, err
 		}
@@ -300,7 +300,7 @@ func (r *AddressGroupBindingReconciler) reconcileNormal(ctx context.Context, bin
 	// 5. Update status
 	setCondition(binding, netguardv1alpha1.ConditionReady, metav1.ConditionTrue, "BindingCreated",
 		"AddressGroupBinding successfully created")
-	if err := r.Status().Update(ctx, binding); err != nil {
+	if err := UpdateStatusWithRetry(ctx, r.Client, binding, DefaultMaxRetries); err != nil {
 		logger.Error(err, "Failed to update AddressGroupBinding status")
 		return ctrl.Result{}, err
 	}
@@ -334,7 +334,7 @@ func (r *AddressGroupBindingReconciler) reconcileDelete(ctx context.Context, bin
 					service.AddressGroups.Items[:i],
 					service.AddressGroups.Items[i+1:]...)
 
-				if err := r.Update(ctx, service); err != nil {
+				if err := UpdateWithRetry(ctx, r.Client, service, DefaultMaxRetries); err != nil {
 					logger.Error(err, "Failed to remove AddressGroup from Service.AddressGroups")
 					return ctrl.Result{}, err
 				}
@@ -392,7 +392,7 @@ func (r *AddressGroupBindingReconciler) reconcileDelete(ctx context.Context, bin
 
 	// 3. Remove finalizer
 	controllerutil.RemoveFinalizer(binding, finalizer)
-	if err := r.Update(ctx, binding); err != nil {
+	if err := UpdateWithRetry(ctx, r.Client, binding, DefaultMaxRetries); err != nil {
 		logger.Error(err, "Failed to remove finalizer from AddressGroupBinding")
 		return ctrl.Result{}, err
 	}

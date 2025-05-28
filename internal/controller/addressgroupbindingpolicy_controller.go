@@ -88,7 +88,7 @@ func (r *AddressGroupBindingPolicyReconciler) Reconcile(ctx context.Context, req
 		// Set condition to indicate that the AddressGroup was not found
 		setAddressGroupBindingPolicyCondition(policy, "AddressGroupFound", metav1.ConditionFalse, "AddressGroupNotFound",
 			fmt.Sprintf("AddressGroup %s not found in namespace %s", addressGroupRef.GetName(), addressGroupNamespace))
-		if err := r.Status().Update(ctx, policy); err != nil {
+		if err := UpdateStatusWithRetry(ctx, r.Client, policy, DefaultMaxRetries); err != nil {
 			logger.Error(err, "Failed to update AddressGroupBindingPolicy status")
 		}
 		return ctrl.Result{RequeueAfter: time.Minute}, nil
@@ -108,7 +108,7 @@ func (r *AddressGroupBindingPolicyReconciler) Reconcile(ctx context.Context, req
 		// Set condition to indicate that the Service was not found
 		setAddressGroupBindingPolicyCondition(policy, "ServiceFound", metav1.ConditionFalse, "ServiceNotFound",
 			fmt.Sprintf("Service %s not found in namespace %s", serviceRef.GetName(), serviceNamespace))
-		if err := r.Status().Update(ctx, policy); err != nil {
+		if err := UpdateStatusWithRetry(ctx, r.Client, policy, DefaultMaxRetries); err != nil {
 			logger.Error(err, "Failed to update AddressGroupBindingPolicy status")
 		}
 		return ctrl.Result{RequeueAfter: time.Minute}, nil
@@ -117,7 +117,7 @@ func (r *AddressGroupBindingPolicyReconciler) Reconcile(ctx context.Context, req
 	// All resources exist, set Ready condition to true
 	setAddressGroupBindingPolicyCondition(policy, "Ready", metav1.ConditionTrue, "PolicyValid",
 		"AddressGroupBindingPolicy is valid and ready")
-	if err := r.Status().Update(ctx, policy); err != nil {
+	if err := UpdateStatusWithRetry(ctx, r.Client, policy, DefaultMaxRetries); err != nil {
 		logger.Error(err, "Failed to update AddressGroupBindingPolicy status")
 		return ctrl.Result{}, err
 	}

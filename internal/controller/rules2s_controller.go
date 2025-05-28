@@ -100,7 +100,9 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		if err := UpdateStatusWithRetry(ctx, r.Client, ruleS2S, DefaultMaxRetries); err != nil {
 			logger.Error(err, "Failed to update RuleS2S status")
 		}
-		return ctrl.Result{RequeueAfter: time.Minute}, err
+		// Return only RequeueAfter without the error to avoid warning
+		logger.Info("Local service alias not found, will retry later", "name", ruleS2S.Spec.ServiceLocalRef.Name)
+		return ctrl.Result{RequeueAfter: time.Minute}, nil
 	}
 
 	targetServiceAlias := &netguardv1alpha1.ServiceAlias{}
@@ -119,7 +121,9 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		if err := UpdateStatusWithRetry(ctx, r.Client, ruleS2S, DefaultMaxRetries); err != nil {
 			logger.Error(err, "Failed to update RuleS2S status")
 		}
-		return ctrl.Result{RequeueAfter: time.Minute}, err
+		// Return only RequeueAfter without the error to avoid warning
+		logger.Info("Target service alias not found, will retry later", "name", ruleS2S.Spec.ServiceRef.Name, "namespace", targetNamespace)
+		return ctrl.Result{RequeueAfter: time.Minute}, nil
 	}
 
 	// Get the actual Service objects
@@ -139,7 +143,9 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		if err := UpdateStatusWithRetry(ctx, r.Client, ruleS2S, DefaultMaxRetries); err != nil {
 			logger.Error(err, "Failed to update RuleS2S status")
 		}
-		return ctrl.Result{RequeueAfter: time.Minute}, err
+		// Return only RequeueAfter without the error to avoid warning
+		logger.Info("Local service not found, will retry later", "name", localServiceAlias.Spec.ServiceRef.Name, "namespace", localServiceNamespace)
+		return ctrl.Result{RequeueAfter: time.Minute}, nil
 	}
 
 	targetService := &netguardv1alpha1.Service{}
@@ -158,7 +164,9 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		if err := UpdateStatusWithRetry(ctx, r.Client, ruleS2S, DefaultMaxRetries); err != nil {
 			logger.Error(err, "Failed to update RuleS2S status")
 		}
-		return ctrl.Result{RequeueAfter: time.Minute}, err
+		// Return only RequeueAfter without the error to avoid warning
+		logger.Info("Target service not found, will retry later", "name", targetServiceAlias.Spec.ServiceRef.Name, "namespace", targetServiceNamespace)
+		return ctrl.Result{RequeueAfter: time.Minute}, nil
 	}
 
 	// Update RuleS2SDstOwnRef for cross-namespace references
@@ -183,7 +191,7 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 					Namespace: ruleS2S.Namespace,
 				})
 
-			if err := r.Update(ctx, targetService); err != nil {
+			if err := UpdateWithRetry(ctx, r.Client, targetService, DefaultMaxRetries); err != nil {
 				logger.Error(err, "Failed to update target service RuleS2SDstOwnRef")
 				return ctrl.Result{RequeueAfter: time.Minute}, err
 			}
@@ -194,7 +202,7 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			logger.Error(err, "Failed to set owner reference")
 			return ctrl.Result{RequeueAfter: time.Minute}, err
 		}
-		if err := r.Update(ctx, ruleS2S); err != nil {
+		if err := UpdateWithRetry(ctx, r.Client, ruleS2S, DefaultMaxRetries); err != nil {
 			logger.Error(err, "Failed to update RuleS2S with owner reference")
 			return ctrl.Result{RequeueAfter: time.Minute}, err
 		}
@@ -215,7 +223,11 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		if err := UpdateStatusWithRetry(ctx, r.Client, ruleS2S, DefaultMaxRetries); err != nil {
 			logger.Error(err, "Failed to update RuleS2S status")
 		}
-		return ctrl.Result{RequeueAfter: time.Minute}, fmt.Errorf("one or both services have no address groups")
+		// Return only RequeueAfter without the error to avoid warning
+		logger.Info("One or both services have no address groups, will retry later",
+			"localService", localService.Name,
+			"targetService", targetService.Name)
+		return ctrl.Result{RequeueAfter: time.Minute}, nil
 	}
 
 	// Determine which ports to use based on traffic direction
@@ -240,7 +252,10 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		if err := UpdateStatusWithRetry(ctx, r.Client, ruleS2S, DefaultMaxRetries); err != nil {
 			logger.Error(err, "Failed to update RuleS2S status")
 		}
-		return ctrl.Result{RequeueAfter: time.Minute}, fmt.Errorf("no ports defined for the service")
+		// Return only RequeueAfter without the error to avoid warning
+		logger.Info("No ports defined for the service, will retry later",
+			"traffic", ruleS2S.Spec.Traffic)
+		return ctrl.Result{RequeueAfter: time.Minute}, nil
 	}
 
 	// Create IEAgAgRule resources for each combination of address groups and ports
@@ -313,7 +328,9 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		if err := UpdateStatusWithRetry(ctx, r.Client, ruleS2S, DefaultMaxRetries); err != nil {
 			logger.Error(err, "Failed to update RuleS2S status")
 		}
-		return ctrl.Result{RequeueAfter: time.Minute}, fmt.Errorf("failed to create any rules")
+		// Return only RequeueAfter without the error to avoid warning
+		logger.Info("Failed to create any rules, will retry later")
+		return ctrl.Result{RequeueAfter: time.Minute}, nil
 	}
 
 	return ctrl.Result{}, nil
