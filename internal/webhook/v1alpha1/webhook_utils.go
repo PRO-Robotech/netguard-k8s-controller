@@ -26,6 +26,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	netguardv1alpha1 "sgroups.io/netguard/api/v1alpha1"
+	providerv1alpha1 "sgroups.io/netguard/deps/apis/sgroups-k8s-provider/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -108,6 +109,8 @@ func IsReadyConditionTrue(obj runtime.Object) bool {
 		return isConditionTrue(o.Status.Conditions, netguardv1alpha1.ConditionReady)
 	case *netguardv1alpha1.AddressGroupBindingPolicy:
 		return isConditionTrue(o.Status.Conditions, netguardv1alpha1.ConditionReady)
+	case *providerv1alpha1.AddressGroup:
+		return isConditionTrue(o.Status.Conditions, providerv1alpha1.ConditionReady)
 	default:
 		// If we don't know how to check the condition, assume it's not ready
 		return false
