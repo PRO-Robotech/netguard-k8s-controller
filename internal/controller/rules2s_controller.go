@@ -661,8 +661,7 @@ func (r *RuleS2SReconciler) generateRuleName(
 	protocol string,
 ) string {
 	// Generate deterministic UUID based on input parameters
-	input := fmt.Sprintf("%s-%s-%s-%s-%s",
-		ruleName,
+	input := fmt.Sprintf("%s-%s-%s-%s",
 		strings.ToLower(trafficDirection),
 		localAGName,
 		targetAGName,
