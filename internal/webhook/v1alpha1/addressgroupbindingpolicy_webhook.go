@@ -196,20 +196,8 @@ func (v *AddressGroupBindingPolicyCustomValidator) ValidateUpdate(ctx context.Co
 		return nil, nil
 	}
 
-	// 1.1 Ensure spec is immutable
-	// Check that ServiceRef hasn't changed
-	if err := ValidateObjectReferenceNotChanged(
-		&oldPolicy.Spec.ServiceRef,
-		&newPolicy.Spec.ServiceRef,
-		"spec.serviceRef"); err != nil {
-		return nil, err
-	}
-
-	// Check that AddressGroupRef hasn't changed
-	if err := ValidateObjectReferenceNotChanged(
-		&oldPolicy.Spec.AddressGroupRef,
-		&newPolicy.Spec.AddressGroupRef,
-		"spec.addressGroupRef"); err != nil {
+	// Check that spec hasn't changed when Ready condition is true
+	if err := ValidateSpecNotChangedWhenReady(oldObj, newObj, oldPolicy.Spec, newPolicy.Spec); err != nil {
 		return nil, err
 	}
 

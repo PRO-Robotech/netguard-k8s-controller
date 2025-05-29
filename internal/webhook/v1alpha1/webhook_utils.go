@@ -19,6 +19,7 @@ package v1alpha1
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -131,6 +132,19 @@ func ValidateFieldNotChangedWhenReady(fieldName string, oldObj, newObj runtime.O
 		// Check if the Ready condition is true in the old object
 		if IsReadyConditionTrue(oldObj) {
 			return fmt.Errorf("cannot change %s when Ready condition is true", fieldName)
+		}
+	}
+	return nil
+}
+
+// ValidateSpecNotChangedWhenReady validates that the Spec hasn't changed during an update
+// if the Ready condition is true
+func ValidateSpecNotChangedWhenReady(oldObj, newObj runtime.Object, oldSpec, newSpec interface{}) error {
+	// Check if specs are different
+	if !reflect.DeepEqual(oldSpec, newSpec) {
+		// Check if the Ready condition is true in the old object
+		if IsReadyConditionTrue(oldObj) {
+			return fmt.Errorf("spec cannot be changed when Ready condition is true")
 		}
 	}
 	return nil

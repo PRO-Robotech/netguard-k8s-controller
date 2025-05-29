@@ -19,7 +19,6 @@ package v1alpha1
 import (
 	"context"
 	"fmt"
-	"reflect"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -119,9 +118,9 @@ func (v *RuleS2SCustomValidator) ValidateUpdate(ctx context.Context, oldObj, new
 		return nil, nil
 	}
 
-	// Check that spec hasn't changed (spec is immutable)
-	if !reflect.DeepEqual(oldRule.Spec, newRule.Spec) {
-		return nil, fmt.Errorf("spec of RuleS2S cannot be changed")
+	// Check that spec hasn't changed when Ready condition is true
+	if err := ValidateSpecNotChangedWhenReady(oldObj, newObj, oldRule.Spec, newRule.Spec); err != nil {
+		return nil, err
 	}
 
 	return nil, nil

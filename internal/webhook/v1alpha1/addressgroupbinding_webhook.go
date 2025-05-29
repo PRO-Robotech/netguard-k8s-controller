@@ -224,20 +224,8 @@ func (v *AddressGroupBindingCustomValidator) ValidateUpdate(ctx context.Context,
 		return nil, nil
 	}
 
-	// 1.1 Ensure spec is immutable
-	// Check that ServiceRef hasn't changed
-	if err := ValidateObjectReferenceNotChanged(
-		&oldBinding.Spec.ServiceRef,
-		&newBinding.Spec.ServiceRef,
-		"spec.serviceRef"); err != nil {
-		return nil, err
-	}
-
-	// Check that AddressGroupRef hasn't changed
-	if err := ValidateObjectReferenceNotChanged(
-		&oldBinding.Spec.AddressGroupRef,
-		&newBinding.Spec.AddressGroupRef,
-		"spec.addressGroupRef"); err != nil {
+	// Check that spec hasn't changed when Ready condition is true
+	if err := ValidateSpecNotChangedWhenReady(oldObj, newObj, oldBinding.Spec, newBinding.Spec); err != nil {
 		return nil, err
 	}
 

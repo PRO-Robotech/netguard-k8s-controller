@@ -19,7 +19,6 @@ package v1alpha1
 import (
 	"context"
 	"fmt"
-	"reflect"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -46,10 +45,9 @@ func SetupServiceAliasWebhookWithManager(mgr ctrl.Manager) error {
 
 // TODO(user): EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 
-// TODO(user): change verbs to "verbs=create;update;delete" if you want to enable deletion validation.
 // NOTE: The 'path' attribute must follow a specific pattern and should not be modified directly here.
 // Modifying the path for an invalid path can cause API server errors; failing to locate the webhook.
-// +kubebuilder:webhook:path=/validate-netguard-sgroups-io-v1alpha1-servicealias,mutating=false,failurePolicy=fail,sideEffects=None,groups=netguard.sgroups.io,resources=servicealias,verbs=create;update,versions=v1alpha1,name=vservicealias-v1alpha1.kb.io,admissionReviewVersions=v1
+// +kubebuilder:webhook:path=/validate-netguard-sgroups-io-v1alpha1-servicealias,mutating=false,failurePolicy=fail,sideEffects=None,groups=netguard.sgroups.io,resources=servicealias,verbs=create;update;delete,versions=v1alpha1,name=vservicealias-v1alpha1.kb.io,admissionReviewVersions=v1
 
 // ServiceAliasCustomValidator struct is responsible for validating the ServiceAlias resource
 // when it is created, updated, or deleted.
@@ -102,9 +100,9 @@ func (v *ServiceAliasCustomValidator) ValidateUpdate(ctx context.Context, oldObj
 		return nil, nil
 	}
 
-	// Check that spec hasn't changed (should be immutable)
-	if !reflect.DeepEqual(oldServiceAlias.Spec, newServiceAlias.Spec) {
-		return nil, fmt.Errorf("spec of ServiceAlias cannot be changed")
+	// Check that spec hasn't changed when Ready condition is true
+	if err := ValidateSpecNotChangedWhenReady(oldObj, newObj, oldServiceAlias.Spec, newServiceAlias.Spec); err != nil {
+		return nil, err
 	}
 
 	return nil, nil
@@ -112,13 +110,40 @@ func (v *ServiceAliasCustomValidator) ValidateUpdate(ctx context.Context, oldObj
 
 // ValidateDelete implements webhook.CustomValidator so a webhook will be registered for the type ServiceAlias.
 func (v *ServiceAliasCustomValidator) ValidateDelete(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	servicealias, ok := obj.(*netguardv1alpha1.ServiceAlias)
+	serviceAlias, ok := obj.(*netguardv1alpha1.ServiceAlias)
 	if !ok {
 		return nil, fmt.Errorf("expected a ServiceAlias object but got %T", obj)
 	}
-	servicealiaslog.Info("Validation for ServiceAlias upon deletion", "name", servicealias.GetName())
+	servicealiaslog.Info("Validation for ServiceAlias upon deletion", "name", serviceAlias.GetName())
 
-	// TODO(user): fill in your validation logic upon object deletion.
+	// Check if there are any RuleS2S resources that reference this ServiceAlias
+	ruleS2SList := &netguardv1alpha1.RuleS2SList{}
+	if err := v.Client.List(ctx, ruleS2SList); err != nil {
+		servicealiaslog.Error(err, "Failed to list RuleS2S objects")
+		return nil, fmt.Errorf("failed to list RuleS2S objects: %w", err)
+	}
+
+	// Check if any rules reference this ServiceAlias
+	for _, rule := range ruleS2SList.Items {
+		// Check if the rule references this ServiceAlias as local service
+		if rule.Spec.ServiceLocalRef.Name == serviceAlias.Name &&
+			rule.Namespace == serviceAlias.Namespace {
+			servicealiaslog.Info("Cannot delete ServiceAlias: it is referenced by RuleS2S as local service",
+				"serviceAlias", serviceAlias.Name, "rule", rule.Name)
+			return nil, fmt.Errorf("cannot delete ServiceAlias %s: it is referenced by RuleS2S %s as local service",
+				serviceAlias.Name, rule.Name)
+		}
+
+		// Check if the rule references this ServiceAlias as target service
+		targetNamespace := rule.Spec.ServiceRef.ResolveNamespace(rule.Namespace)
+		if rule.Spec.ServiceRef.Name == serviceAlias.Name &&
+			targetNamespace == serviceAlias.Namespace {
+			servicealiaslog.Info("Cannot delete ServiceAlias: it is referenced by RuleS2S as target service",
+				"serviceAlias", serviceAlias.Name, "rule", rule.Name)
+			return nil, fmt.Errorf("cannot delete ServiceAlias %s: it is referenced by RuleS2S %s as target service",
+				serviceAlias.Name, rule.Name)
+		}
+	}
 
 	return nil, nil
 }

@@ -19,7 +19,6 @@ package v1alpha1
 import (
 	"context"
 	"fmt"
-	"reflect"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -96,9 +95,9 @@ func (v *AddressGroupPortMappingCustomValidator) ValidateUpdate(ctx context.Cont
 		return nil, nil
 	}
 
-	// Check that spec hasn't changed (should remain empty)
-	if !reflect.DeepEqual(oldPortMapping.Spec, newPortMapping.Spec) {
-		return nil, fmt.Errorf("spec of AddressGroupPortMapping cannot be changed")
+	// Check that spec hasn't changed when Ready condition is true
+	if err := ValidateSpecNotChangedWhenReady(oldObj, newObj, oldPortMapping.Spec, newPortMapping.Spec); err != nil {
+		return nil, err
 	}
 
 	// Check for internal port overlaps
