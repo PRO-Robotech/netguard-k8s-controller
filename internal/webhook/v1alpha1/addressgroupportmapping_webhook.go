@@ -36,6 +36,7 @@ var addressgroupportmappinglog = logf.Log.WithName("addressgroupportmapping-reso
 
 // SetupAddressGroupPortMappingWebhookWithManager registers the webhook for AddressGroupPortMapping in the manager.
 func SetupAddressGroupPortMappingWebhookWithManager(mgr ctrl.Manager) error {
+	addressgroupportmappinglog.Info("setting up manager", "webhook", "AddressGroupPortMapping")
 	return ctrl.NewWebhookManagedBy(mgr).For(&netguardv1alpha1.AddressGroupPortMapping{}).
 		WithValidator(&AddressGroupPortMappingCustomValidator{
 			Client: mgr.GetClient(),

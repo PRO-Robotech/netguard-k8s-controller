@@ -37,6 +37,7 @@ var addressgroupbindingpolicylog = logf.Log.WithName("addressgroupbindingpolicy-
 
 // SetupAddressGroupBindingPolicyWebhookWithManager registers the webhook for AddressGroupBindingPolicy in the manager.
 func SetupAddressGroupBindingPolicyWebhookWithManager(mgr ctrl.Manager) error {
+	addressgroupbindingpolicylog.Info("setting up manager", "webhook", "AddressGroupBindingPolicy")
 	return ctrl.NewWebhookManagedBy(mgr).For(&netguardv1alpha1.AddressGroupBindingPolicy{}).
 		WithValidator(&AddressGroupBindingPolicyCustomValidator{
 			Client: mgr.GetClient(),

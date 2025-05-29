@@ -37,6 +37,7 @@ var servicelog = logf.Log.WithName("service-resource")
 
 // SetupServiceWebhookWithManager registers the webhook for Service in the manager.
 func SetupServiceWebhookWithManager(mgr ctrl.Manager) error {
+	servicelog.Info("setting up manager", "webhook", "Service")
 	return ctrl.NewWebhookManagedBy(mgr).For(&netguardv1alpha1.Service{}).
 		WithValidator(&ServiceCustomValidator{
 			Client: mgr.GetClient(),

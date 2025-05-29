@@ -37,6 +37,7 @@ var rules2slog = logf.Log.WithName("rules2s-resource")
 
 // SetupRuleS2SWebhookWithManager registers the webhook for RuleS2S in the manager.
 func SetupRuleS2SWebhookWithManager(mgr ctrl.Manager) error {
+	rules2slog.Info("setting up manager", "webhook", "RuleS2S")
 	return ctrl.NewWebhookManagedBy(mgr).For(&netguardv1alpha1.RuleS2S{}).
 		WithValidator(&RuleS2SCustomValidator{
 			Client: mgr.GetClient(),
@@ -56,7 +57,6 @@ func SetupRuleS2SWebhookWithManager(mgr ctrl.Manager) error {
 //
 // NOTE: The +kubebuilder:object:generate=false marker prevents controller-gen from generating DeepCopy methods,
 // as this struct is used only for temporary operations and does not need to be deeply copied.
-// +kubebuilder:object:generate=false
 type RuleS2SCustomValidator struct {
 	Client client.Client
 }

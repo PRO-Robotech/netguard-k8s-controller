@@ -36,6 +36,7 @@ var servicealiaslog = logf.Log.WithName("servicealias-resource")
 
 // SetupServiceAliasWebhookWithManager registers the webhook for ServiceAlias in the manager.
 func SetupServiceAliasWebhookWithManager(mgr ctrl.Manager) error {
+	servicealiaslog.Info("setting up manager", "webhook", "ServiceAlias")
 	return ctrl.NewWebhookManagedBy(mgr).For(&netguardv1alpha1.ServiceAlias{}).
 		WithValidator(&ServiceAliasCustomValidator{
 			Client: mgr.GetClient(),
