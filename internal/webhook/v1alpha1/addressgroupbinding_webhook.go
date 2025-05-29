@@ -105,6 +105,11 @@ func (v *AddressGroupBindingCustomValidator) ValidateCreate(ctx context.Context,
 		return nil, fmt.Errorf("service %s not found: %w", serviceRef.GetName(), err)
 	}
 
+	// Check if Service is Ready
+	if err := ValidateReferencedObjectIsReady(service, serviceRef.GetName(), "Service"); err != nil {
+		return nil, err
+	}
+
 	// 1.1 Validate AddressGroupRef
 	addressGroupRef := binding.Spec.AddressGroupRef
 	if addressGroupRef.GetName() == "" {
@@ -129,6 +134,11 @@ func (v *AddressGroupBindingCustomValidator) ValidateCreate(ctx context.Context,
 			addressGroupRef.GetName(),
 			addressGroupNamespace,
 			err)
+	}
+
+	// Check if AddressGroup is Ready
+	if err := ValidateReferencedObjectIsReady(addressGroup, addressGroupRef.GetName(), "AddressGroup"); err != nil {
+		return nil, err
 	}
 
 	// 1.3 Get AddressGroupPortMapping for port information
@@ -240,6 +250,11 @@ func (v *AddressGroupBindingCustomValidator) ValidateUpdate(ctx context.Context,
 		return nil, fmt.Errorf("service %s not found: %w", serviceRef.GetName(), err)
 	}
 
+	// Check if Service is Ready
+	if err := ValidateReferencedObjectIsReady(service, serviceRef.GetName(), "Service"); err != nil {
+		return nil, err
+	}
+
 	// 1.2 Check if AddressGroup exists directly
 	addressGroupRef := newBinding.Spec.AddressGroupRef
 	addressGroupNamespace := ResolveNamespace(addressGroupRef.GetNamespace(), newBinding.GetNamespace())
@@ -253,6 +268,11 @@ func (v *AddressGroupBindingCustomValidator) ValidateUpdate(ctx context.Context,
 			addressGroupRef.GetName(),
 			addressGroupNamespace,
 			err)
+	}
+
+	// Check if AddressGroup is Ready
+	if err := ValidateReferencedObjectIsReady(addressGroup, addressGroupRef.GetName(), "AddressGroup"); err != nil {
+		return nil, err
 	}
 
 	// 1.3 Get AddressGroupPortMapping for port information

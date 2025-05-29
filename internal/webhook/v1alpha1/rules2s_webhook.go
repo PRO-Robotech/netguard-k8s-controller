@@ -84,6 +84,11 @@ func (v *RuleS2SCustomValidator) ValidateCreate(ctx context.Context, obj runtime
 			localServiceNamespace, localServiceName, err)
 	}
 
+	// Check if local ServiceAlias is Ready
+	if err := ValidateReferencedObjectIsReady(localServiceAlias, localServiceName, "ServiceAlias"); err != nil {
+		return nil, err
+	}
+
 	// Validate that serviceRef exists
 	targetServiceAlias := &netguardv1alpha1.ServiceAlias{}
 	targetServiceNamespace := rule.Spec.ServiceRef.ResolveNamespace(rule.Namespace)
@@ -95,6 +100,11 @@ func (v *RuleS2SCustomValidator) ValidateCreate(ctx context.Context, obj runtime
 	}, targetServiceAlias); err != nil {
 		return nil, fmt.Errorf("serviceRef %s/%s does not exist: %w",
 			targetServiceNamespace, targetServiceName, err)
+	}
+
+	// Check if target ServiceAlias is Ready
+	if err := ValidateReferencedObjectIsReady(targetServiceAlias, targetServiceName, "ServiceAlias"); err != nil {
+		return nil, err
 	}
 
 	return nil, nil

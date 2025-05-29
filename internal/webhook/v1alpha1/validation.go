@@ -81,3 +81,14 @@ func ValidateObjectReferenceNotChangedWhenReady(oldObj, newObj runtime.Object, o
 
 	return nil
 }
+
+// ValidateReferencedObjectIsReady checks if a referenced object has Ready=True
+// If the object has Ready=False, returns an error
+func ValidateReferencedObjectIsReady(obj runtime.Object, refName, refKind string) error {
+	// Check if the Ready condition is true
+	if !IsReadyConditionTrue(obj) {
+		return fmt.Errorf("referenced %s '%s' is not ready (Ready condition is False or not set)",
+			refKind, refName)
+	}
+	return nil
+}

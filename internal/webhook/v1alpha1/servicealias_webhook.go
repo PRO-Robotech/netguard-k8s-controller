@@ -79,6 +79,11 @@ func (v *ServiceAliasCustomValidator) ValidateCreate(ctx context.Context, obj ru
 		return nil, fmt.Errorf("referenced Service does not exist: %w", err)
 	}
 
+	// Check if Service is Ready
+	if err := ValidateReferencedObjectIsReady(service, serviceAlias.Spec.ServiceRef.GetName(), "Service"); err != nil {
+		return nil, err
+	}
+
 	return nil, nil
 }
 
