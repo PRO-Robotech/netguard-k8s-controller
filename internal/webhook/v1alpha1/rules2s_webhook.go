@@ -71,6 +71,29 @@ func (v *RuleS2SCustomValidator) ValidateCreate(ctx context.Context, obj runtime
 	}
 	rules2slog.Info("Validation for RuleS2S upon creation", "name", rule.GetName())
 
+	// Проверка на существование дубликатов
+	ruleList := &netguardv1alpha1.RuleS2SList{}
+	if err := v.Client.List(ctx, ruleList, client.InNamespace(rule.Namespace)); err != nil {
+		rules2slog.Error(err, "Failed to list RuleS2S objects")
+		return nil, fmt.Errorf("failed to check for duplicate rules: %w", err)
+	}
+
+	for _, existingRule := range ruleList.Items {
+		// Пропускаем ресурсы, которые находятся в процессе удаления
+		if !existingRule.DeletionTimestamp.IsZero() {
+			continue
+		}
+
+		// Проверяем, совпадают ли ключевые поля спецификации
+		if existingRule.Spec.Traffic == rule.Spec.Traffic &&
+			existingRule.Spec.ServiceLocalRef.Name == rule.Spec.ServiceLocalRef.Name &&
+			existingRule.Spec.ServiceRef.Name == rule.Spec.ServiceRef.Name &&
+			existingRule.Spec.ServiceRef.GetNamespace() == rule.Spec.ServiceRef.GetNamespace() {
+
+			return nil, fmt.Errorf("duplicate RuleS2S detected: a rule with the same specification already exists: %s", existingRule.Name)
+		}
+	}
+
 	// Validate that serviceLocalRef exists
 	localServiceAlias := &netguardv1alpha1.ServiceAlias{}
 	localServiceNamespace := rule.Namespace
@@ -126,6 +149,41 @@ func (v *RuleS2SCustomValidator) ValidateUpdate(ctx context.Context, oldObj, new
 	// Skip validation for resources being deleted
 	if !newRule.DeletionTimestamp.IsZero() {
 		return nil, nil
+	}
+
+	// Проверяем, изменилась ли спецификация
+	if oldRule.Spec.Traffic != newRule.Spec.Traffic ||
+		oldRule.Spec.ServiceLocalRef.Name != newRule.Spec.ServiceLocalRef.Name ||
+		oldRule.Spec.ServiceRef.Name != newRule.Spec.ServiceRef.Name ||
+		oldRule.Spec.ServiceRef.GetNamespace() != newRule.Spec.ServiceRef.GetNamespace() {
+
+		// Спецификация изменилась, проверяем на дубликаты
+		ruleList := &netguardv1alpha1.RuleS2SList{}
+		if err := v.Client.List(ctx, ruleList, client.InNamespace(newRule.Namespace)); err != nil {
+			rules2slog.Error(err, "Failed to list RuleS2S objects")
+			return nil, fmt.Errorf("failed to check for duplicate rules: %w", err)
+		}
+
+		for _, existingRule := range ruleList.Items {
+			// Пропускаем ресурсы, которые находятся в процессе удаления
+			if !existingRule.DeletionTimestamp.IsZero() {
+				continue
+			}
+
+			// Пропускаем сам обновляемый объект
+			if existingRule.Name == newRule.Name && existingRule.Namespace == newRule.Namespace {
+				continue
+			}
+
+			// Проверяем, совпадают ли ключевые поля спецификации
+			if existingRule.Spec.Traffic == newRule.Spec.Traffic &&
+				existingRule.Spec.ServiceLocalRef.Name == newRule.Spec.ServiceLocalRef.Name &&
+				existingRule.Spec.ServiceRef.Name == newRule.Spec.ServiceRef.Name &&
+				existingRule.Spec.ServiceRef.GetNamespace() == newRule.Spec.ServiceRef.GetNamespace() {
+
+				return nil, fmt.Errorf("duplicate RuleS2S detected: a rule with the same specification already exists: %s", existingRule.Name)
+			}
+		}
 	}
 
 	// Check that spec hasn't changed when Ready condition is true

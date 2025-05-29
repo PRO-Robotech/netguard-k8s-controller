@@ -885,6 +885,22 @@ func (r *RuleS2SReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return err
 	}
 
+	// Добавляем составной индекс для быстрого поиска дубликатов
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(),
+		&netguardv1alpha1.RuleS2S{}, "spec.composite",
+		func(obj client.Object) []string {
+			rule := obj.(*netguardv1alpha1.RuleS2S)
+			// Создаем уникальный ключ на основе полей спецификации
+			composite := fmt.Sprintf("%s-%s-%s-%s",
+				rule.Spec.Traffic,
+				rule.Spec.ServiceLocalRef.Name,
+				rule.Spec.ServiceRef.Name,
+				rule.Spec.ServiceRef.GetNamespace())
+			return []string{composite}
+		}); err != nil {
+		return err
+	}
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&netguardv1alpha1.RuleS2S{}).
 		// Watch for changes to Service resources
