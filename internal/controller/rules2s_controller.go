@@ -259,9 +259,24 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	// Create IEAgAgRule resources for each combination of address groups and ports
+	logger.Info("Starting rule creation for RuleS2S",
+		"name", ruleS2S.Name,
+		"namespace", ruleS2S.Namespace,
+		"uid", ruleS2S.GetUID(),
+		"localAddressGroups", len(localAddressGroups),
+		"targetAddressGroups", len(targetAddressGroups),
+		"ports", len(ports))
+
 	createdRules := []string{}
-	for _, localAG := range localAddressGroups {
-		for _, targetAG := range targetAddressGroups {
+	for i, localAG := range localAddressGroups {
+		for j, targetAG := range targetAddressGroups {
+			logger.Info("Processing address group combination",
+				"localAG", localAG.Name,
+				"localAG.Namespace", localAG.GetNamespace(),
+				"targetAG", targetAG.Name,
+				"targetAG.Namespace", targetAG.GetNamespace(),
+				"combination", fmt.Sprintf("%d/%d", i*len(targetAddressGroups)+j+1, len(localAddressGroups)*len(targetAddressGroups)))
+
 			// Group ports by protocol
 			tcpPorts := []string{}
 			udpPorts := []string{}
@@ -274,18 +289,34 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 				}
 			}
 
+			logger.Info("Grouped ports by protocol",
+				"tcpPorts", len(tcpPorts),
+				"udpPorts", len(udpPorts))
+
 			// Create TCP rule if there are TCP ports
 			if len(tcpPorts) > 0 {
 				// Combine all TCP ports into a single comma-separated string
 				combinedTcpPorts := strings.Join(tcpPorts, ",")
 
+				logger.Info("Creating/updating TCP rule",
+					"localAG", localAG.Name,
+					"targetAG", targetAG.Name,
+					"ports", combinedTcpPorts)
+
 				// Create or update the rule
 				ruleName, err := r.createOrUpdateIEAgAgRule(ctx, ruleS2S, localAG, targetAG,
 					netguardv1alpha1.ProtocolTCP, combinedTcpPorts)
 				if err != nil {
-					logger.Error(err, "Failed to create/update TCP rule")
+					logger.Error(err, "Failed to create/update TCP rule",
+						"localAG", localAG.Name,
+						"targetAG", targetAG.Name,
+						"errorType", fmt.Sprintf("%T", err))
 					continue
 				}
+				logger.Info("Successfully created/updated TCP rule",
+					"ruleName", ruleName,
+					"localAG", localAG.Name,
+					"targetAG", targetAG.Name)
 				createdRules = append(createdRules, ruleName)
 			}
 
@@ -294,17 +325,34 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 				// Combine all UDP ports into a single comma-separated string
 				combinedUdpPorts := strings.Join(udpPorts, ",")
 
+				logger.Info("Creating/updating UDP rule",
+					"localAG", localAG.Name,
+					"targetAG", targetAG.Name,
+					"ports", combinedUdpPorts)
+
 				// Create or update the rule
 				ruleName, err := r.createOrUpdateIEAgAgRule(ctx, ruleS2S, localAG, targetAG,
 					netguardv1alpha1.ProtocolUDP, combinedUdpPorts)
 				if err != nil {
-					logger.Error(err, "Failed to create/update UDP rule")
+					logger.Error(err, "Failed to create/update UDP rule",
+						"localAG", localAG.Name,
+						"targetAG", targetAG.Name,
+						"errorType", fmt.Sprintf("%T", err))
 					continue
 				}
+				logger.Info("Successfully created/updated UDP rule",
+					"ruleName", ruleName,
+					"localAG", localAG.Name,
+					"targetAG", targetAG.Name)
 				createdRules = append(createdRules, ruleName)
 			}
 		}
 	}
+
+	logger.Info("Completed rule creation",
+		"name", ruleS2S.Name,
+		"createdRules", len(createdRules),
+		"ruleNames", strings.Join(createdRules, ", "))
 
 	// Update status to Ready if we created at least one rule
 	if len(createdRules) > 0 {
@@ -345,19 +393,40 @@ func (r *RuleS2SReconciler) createOrUpdateIEAgAgRule(
 	protocol netguardv1alpha1.TransportProtocol,
 	portsStr string,
 ) (string, error) {
-	// Determine namespace for the rule based on traffic direction
 	logger := log.FromContext(ctx)
+
+	// Логирование входных параметров
+	logger.Info("Starting createOrUpdateIEAgAgRule",
+		"ruleS2S", ruleS2S.Name,
+		"ruleS2S.UID", ruleS2S.GetUID(),
+		"localAG", localAG.Name,
+		"localAG.Namespace", localAG.GetNamespace(),
+		"targetAG", targetAG.Name,
+		"targetAG.Namespace", targetAG.GetNamespace(),
+		"protocol", protocol,
+		"ports", portsStr)
+
+	// Determine namespace for the rule based on traffic direction
 	var ruleNamespace string
 	if ruleS2S.Spec.Traffic == "ingress" {
 		// For ingress, rule goes in the local AG namespace (receiver)
 		ruleNamespace = localAG.ResolveNamespace(ruleS2S.GetNamespace())
+		logger.Info("Using ingress namespace logic",
+			"ruleNamespace", ruleNamespace,
+			"localAG.Namespace", localAG.GetNamespace(),
+			"ruleS2S.Namespace", ruleS2S.GetNamespace())
 	} else {
 		// For egress, rule goes in the target AG namespace (receiver)
 		ruleNamespace = targetAG.ResolveNamespace(ruleS2S.GetNamespace())
+		logger.Info("Using egress namespace logic",
+			"ruleNamespace", ruleNamespace,
+			"targetAG.Namespace", targetAG.GetNamespace(),
+			"ruleS2S.Namespace", ruleS2S.GetNamespace())
 	}
 
 	// Ensure namespace is not empty
 	if ruleNamespace == "" {
+		logger.Error(fmt.Errorf("empty namespace"), "Cannot create rule with empty namespace")
 		return "", fmt.Errorf("cannot create rule with empty namespace")
 	}
 
@@ -369,7 +438,14 @@ func (r *RuleS2SReconciler) createOrUpdateIEAgAgRule(
 		targetAG.Name,
 		string(protocol))
 
-	logger.Info("Creating rule", "namespace", ruleNamespace, "ruleName", ruleName, "traffic", ruleS2S.Spec.Traffic)
+	logger.Info("Generated rule name",
+		"ruleName", ruleName,
+		"input", fmt.Sprintf("%s-%s-%s-%s-%s",
+			ruleS2S.Name,
+			strings.ToLower(ruleS2S.Spec.Traffic),
+			localAG.Name,
+			targetAG.Name,
+			strings.ToLower(string(protocol))))
 
 	// Define the rule spec
 	ruleSpec := providerv1alpha1.IEAgAgRuleSpec{
@@ -411,6 +487,11 @@ func (r *RuleS2SReconciler) createOrUpdateIEAgAgRule(
 	}, existingRule)
 
 	if err != nil && errors.IsNotFound(err) {
+		logger.Info("Rule not found, will create new",
+			"namespace", ruleNamespace,
+			"name", ruleName,
+			"error", err.Error())
+
 		// Rule doesn't exist, create it with retry
 		logger.Info("Creating new IEAgAgRule", "namespace", ruleNamespace, "name", ruleName)
 
@@ -432,11 +513,27 @@ func (r *RuleS2SReconciler) createOrUpdateIEAgAgRule(
 			},
 			Spec: ruleSpec,
 		}
-		logger.Info("IEAgAgRule owner refs", "rule", newRule.Name, "refs", newRule.OwnerReferences)
+		logger.Info("IEAgAgRule owner refs",
+			"rule", newRule.Name,
+			"refs", newRule.OwnerReferences,
+			"ruleS2S.UID", ruleS2S.GetUID())
+
 		// Try to create with retries
 		for i := 0; i < DefaultMaxRetries; i++ {
+			logger.Info("Attempting to create rule",
+				"namespace", ruleNamespace,
+				"name", ruleName,
+				"attempt", i+1,
+				"maxRetries", DefaultMaxRetries)
+
 			if err := r.Create(ctx, newRule); err != nil {
 				if errors.IsAlreadyExists(err) {
+					logger.Info("Rule already exists (concurrent creation)",
+						"namespace", ruleNamespace,
+						"name", ruleName,
+						"errorType", fmt.Sprintf("%T", err),
+						"error", err.Error())
+
 					// Rule was created concurrently, get it and update
 					if err := r.Get(ctx, types.NamespacedName{
 						Namespace: ruleNamespace,
@@ -444,28 +541,64 @@ func (r *RuleS2SReconciler) createOrUpdateIEAgAgRule(
 					}, existingRule); err != nil {
 						if errors.IsNotFound(err) {
 							// Strange situation, try again
+							logger.Info("Strange situation: rule reported as existing but not found",
+								"namespace", ruleNamespace,
+								"name", ruleName)
 							continue
 						}
+						logger.Error(err, "Failed to get existing rule after AlreadyExists error",
+							"namespace", ruleNamespace,
+							"name", ruleName)
 						return "", err
 					}
+
+					logger.Info("Found existing rule after AlreadyExists error",
+						"namespace", ruleNamespace,
+						"name", ruleName,
+						"existingUID", existingRule.GetUID(),
+						"existingOwnerRefs", existingRule.GetOwnerReferences())
+
 					// Found the rule, break out to update it
 					break
 				} else if errors.IsConflict(err) {
 					// Conflict, wait and retry
+					logger.Info("Conflict detected when creating rule",
+						"namespace", ruleNamespace,
+						"name", ruleName,
+						"attempt", i+1,
+						"error", err.Error())
 					time.Sleep(DefaultRetryInterval)
 					continue
 				} else {
 					// Other error
+					logger.Error(err, "Failed to create rule",
+						"namespace", ruleNamespace,
+						"name", ruleName,
+						"errorType", fmt.Sprintf("%T", err))
 					return "", err
 				}
 			} else {
 				// Successfully created
+				logger.Info("Successfully created rule",
+					"namespace", ruleNamespace,
+					"name", ruleName)
 				return ruleName, nil
 			}
 		}
 	} else if err != nil {
+		logger.Error(err, "Error checking if rule exists",
+			"namespace", ruleNamespace,
+			"name", ruleName,
+			"errorType", fmt.Sprintf("%T", err))
 		// Error getting the rule
 		return "", err
+	} else {
+		// Правило существует
+		logger.Info("Rule exists, will update",
+			"namespace", ruleNamespace,
+			"name", ruleName,
+			"existingUID", existingRule.GetUID(),
+			"existingOwnerRefs", existingRule.GetOwnerReferences())
 	}
 
 	// Rule exists, update it using patch with retry
@@ -477,8 +610,17 @@ func (r *RuleS2SReconciler) createOrUpdateIEAgAgRule(
 		Namespace: ruleNamespace,
 		Name:      ruleName,
 	}, latestRule); err != nil {
+		logger.Error(err, "Failed to get latest version of rule for update",
+			"namespace", ruleNamespace,
+			"name", ruleName)
 		return "", err
 	}
+
+	logger.Info("Got latest version of rule for update",
+		"namespace", ruleNamespace,
+		"name", ruleName,
+		"resourceVersion", latestRule.GetResourceVersion(),
+		"uid", latestRule.GetUID())
 
 	// Create a copy for patching
 	original := latestRule.DeepCopy()
@@ -486,11 +628,26 @@ func (r *RuleS2SReconciler) createOrUpdateIEAgAgRule(
 	// Update the spec
 	latestRule.Spec = ruleSpec
 
+	// Логирование перед патчем
+	logger.Info("Applying patch to rule",
+		"namespace", ruleNamespace,
+		"name", ruleName,
+		"originalResourceVersion", original.GetResourceVersion(),
+		"newResourceVersion", latestRule.GetResourceVersion())
+
 	// Apply patch with retry
 	patch := client.MergeFrom(original)
 	if err := PatchWithRetry(ctx, r.Client, latestRule, patch, DefaultMaxRetries); err != nil {
+		logger.Error(err, "Failed to patch rule",
+			"namespace", ruleNamespace,
+			"name", ruleName,
+			"errorType", fmt.Sprintf("%T", err))
 		return "", err
 	}
+
+	logger.Info("Successfully patched rule",
+		"namespace", ruleNamespace,
+		"name", ruleName)
 
 	return ruleName, nil
 }
@@ -511,6 +668,8 @@ func (r *RuleS2SReconciler) generateRuleName(
 		targetAGName,
 		strings.ToLower(protocol))
 
+	// Нет доступа к логгеру здесь, но мы логируем входные параметры и результат в вызывающей функции
+
 	h := sha256.New()
 	h.Write([]byte(input))
 	hash := h.Sum(nil)
@@ -520,9 +679,11 @@ func (r *RuleS2SReconciler) generateRuleName(
 		hash[0:4], hash[4:6], hash[6:8], hash[8:10], hash[10:16])
 
 	// Use traffic direction prefix and UUID
-	return fmt.Sprintf("%s-%s",
+	result := fmt.Sprintf("%s-%s",
 		strings.ToLower(trafficDirection)[:3],
 		uuid)
+
+	return result
 }
 
 // deleteRelatedIEAgAgRules deletes all IEAgAgRules that have an OwnerReference to the given RuleS2S

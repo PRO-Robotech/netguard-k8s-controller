@@ -83,36 +83,69 @@ func PatchWithRetry(ctx context.Context, c client.Client, obj client.Object, pat
 	name := obj.GetName()
 	namespace := obj.GetNamespace()
 
+	logger.Info("Starting PatchWithRetry",
+		"resource", fmt.Sprintf("%s/%s", namespace, name),
+		"resourceType", fmt.Sprintf("%T", obj),
+		"resourceUID", obj.GetUID(),
+		"resourceVersion", obj.GetResourceVersion(),
+		"maxRetries", maxRetries)
+
 	for i := 0; i < maxRetries; i++ {
+		logger.Info("Attempting to patch resource",
+			"resource", fmt.Sprintf("%s/%s", namespace, name),
+			"attempt", i+1,
+			"resourceVersion", obj.GetResourceVersion())
+
 		err := c.Patch(ctx, obj, patch)
 		if err == nil {
+			logger.Info("Patch successful",
+				"resource", fmt.Sprintf("%s/%s", namespace, name),
+				"attempt", i+1,
+				"resourceVersion", obj.GetResourceVersion())
 			return nil
 		}
 
+		logger.Error(err, "Patch failed",
+			"resource", fmt.Sprintf("%s/%s", namespace, name),
+			"attempt", i+1,
+			"errorType", fmt.Sprintf("%T", err),
+			"resourceVersion", obj.GetResourceVersion())
+
 		if !apierrors.IsConflict(err) {
+			logger.Error(err, "Non-conflict error when patching",
+				"resource", fmt.Sprintf("%s/%s", namespace, name),
+				"errorType", fmt.Sprintf("%T", err))
 			return err
 		}
 
 		// Get the latest version of the object
 		latest := obj.DeepCopyObject().(client.Object)
 		if err := c.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, latest); err != nil {
+			logger.Error(err, "Failed to get latest version of resource",
+				"resource", fmt.Sprintf("%s/%s", namespace, name))
 			return err
 		}
+
+		logger.Info("Conflict detected, got latest version",
+			"resource", fmt.Sprintf("%s/%s", namespace, name),
+			"latestResourceVersion", latest.GetResourceVersion(),
+			"originalResourceVersion", obj.GetResourceVersion())
 
 		// We can't directly update the original object since it's an interface
 		// Instead, we'll create a new patch from the latest version
 		patch = client.MergeFrom(latest)
 
-		// Log the conflict and retry
-		logger.Info("Conflict detected, retrying patch",
-			"resource", fmt.Sprintf("%s/%s", namespace, name),
-			"attempt", i+1,
-			"maxRetries", maxRetries)
-
 		// Wait before retrying with exponential backoff
 		backoff := DefaultRetryInterval * time.Duration(1<<uint(i))
+		logger.Info("Waiting before retry",
+			"resource", fmt.Sprintf("%s/%s", namespace, name),
+			"backoffMs", backoff.Milliseconds())
 		time.Sleep(backoff)
 	}
+
+	logger.Error(fmt.Errorf("max retries exceeded"), "Failed to patch resource after max retries",
+		"resource", fmt.Sprintf("%s/%s", namespace, name),
+		"maxRetries", maxRetries)
 
 	return fmt.Errorf("failed to patch resource after %d retries", maxRetries)
 }
