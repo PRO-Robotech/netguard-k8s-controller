@@ -216,11 +216,9 @@ func main() {
 		os.Exit(1)
 	}
 	// nolint:goconst
-	if os.Getenv("ENABLE_WEBHOOKS") != "false" {
-		if err = webhooknetguardv1alpha1.SetupServiceWebhookWithManager(mgr); err != nil {
-			setupLog.Error(err, "unable to create webhook", "webhook", "Service")
-			os.Exit(1)
-		}
+	if err = webhooknetguardv1alpha1.SetupServiceWebhookWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create webhook", "webhook", "Service")
+		os.Exit(1)
 	}
 	if err = (&controller.AddressGroupBindingReconciler{
 		Client: mgr.GetClient(),
@@ -230,11 +228,9 @@ func main() {
 		os.Exit(1)
 	}
 	// nolint:goconst
-	if os.Getenv("ENABLE_WEBHOOKS") != "false" {
-		if err = webhooknetguardv1alpha1.SetupAddressGroupBindingWebhookWithManager(mgr); err != nil {
-			setupLog.Error(err, "unable to create webhook", "webhook", "AddressGroupBinding")
-			os.Exit(1)
-		}
+	if err = webhooknetguardv1alpha1.SetupAddressGroupBindingWebhookWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create webhook", "webhook", "AddressGroupBinding")
+		os.Exit(1)
 	}
 	if err = (&controller.AddressGroupPortMappingReconciler{
 		Client: mgr.GetClient(),
@@ -244,11 +240,9 @@ func main() {
 		os.Exit(1)
 	}
 	// nolint:goconst
-	if os.Getenv("ENABLE_WEBHOOKS") != "false" {
-		if err = webhooknetguardv1alpha1.SetupAddressGroupPortMappingWebhookWithManager(mgr); err != nil {
-			setupLog.Error(err, "unable to create webhook", "webhook", "AddressGroupPortMapping")
-			os.Exit(1)
-		}
+	if err = webhooknetguardv1alpha1.SetupAddressGroupPortMappingWebhookWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create webhook", "webhook", "AddressGroupPortMapping")
+		os.Exit(1)
 	}
 	if err = (&controller.AddressGroupBindingPolicyReconciler{
 		Client: mgr.GetClient(),
@@ -258,11 +252,9 @@ func main() {
 		os.Exit(1)
 	}
 	// nolint:goconst
-	if os.Getenv("ENABLE_WEBHOOKS") != "false" {
-		if err = webhooknetguardv1alpha1.SetupAddressGroupBindingPolicyWebhookWithManager(mgr); err != nil {
-			setupLog.Error(err, "unable to create webhook", "webhook", "AddressGroupBindingPolicy")
-			os.Exit(1)
-		}
+	if err = webhooknetguardv1alpha1.SetupAddressGroupBindingPolicyWebhookWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create webhook", "webhook", "AddressGroupBindingPolicy")
+		os.Exit(1)
 	}
 	if err = (&controller.ServiceAliasReconciler{
 		Client: mgr.GetClient(),
@@ -272,11 +264,9 @@ func main() {
 		os.Exit(1)
 	}
 	// nolint:goconst
-	if os.Getenv("ENABLE_WEBHOOKS") != "false" {
-		if err = webhooknetguardv1alpha1.SetupServiceAliasWebhookWithManager(mgr); err != nil {
-			setupLog.Error(err, "unable to create webhook", "webhook", "ServiceAlias")
-			os.Exit(1)
-		}
+	if err = webhooknetguardv1alpha1.SetupServiceAliasWebhookWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create webhook", "webhook", "ServiceAlias")
+		os.Exit(1)
 	}
 	if err = (&controller.RuleS2SReconciler{
 		Client: mgr.GetClient(),
@@ -285,12 +275,10 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "RuleS2S")
 		os.Exit(1)
 	}
-	// nolint:goconst
-	if os.Getenv("ENABLE_WEBHOOKS") != "false" {
-		if err = webhooknetguardv1alpha1.SetupRuleS2SWebhookWithManager(mgr); err != nil {
-			setupLog.Error(err, "unable to create webhook", "webhook", "RuleS2S")
-			os.Exit(1)
-		}
+
+	if err = webhooknetguardv1alpha1.SetupRuleS2SWebhookWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create webhook", "webhook", "RuleS2S")
+		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder
 
