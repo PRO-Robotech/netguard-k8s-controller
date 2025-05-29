@@ -71,9 +71,9 @@ func (v *RuleS2SCustomValidator) ValidateCreate(ctx context.Context, obj runtime
 	}
 	rules2slog.Info("Validation for RuleS2S upon creation", "name", rule.GetName())
 
-	// Проверка на существование дубликатов
+	// Проверка на существование дубликатов по всем namespace
 	ruleList := &netguardv1alpha1.RuleS2SList{}
-	if err := v.Client.List(ctx, ruleList, client.InNamespace(rule.Namespace)); err != nil {
+	if err := v.Client.List(ctx, ruleList); err != nil {
 		rules2slog.Error(err, "Failed to list RuleS2S objects")
 		return nil, fmt.Errorf("failed to check for duplicate rules: %w", err)
 	}
@@ -157,9 +157,9 @@ func (v *RuleS2SCustomValidator) ValidateUpdate(ctx context.Context, oldObj, new
 		oldRule.Spec.ServiceRef.Name != newRule.Spec.ServiceRef.Name ||
 		oldRule.Spec.ServiceRef.GetNamespace() != newRule.Spec.ServiceRef.GetNamespace() {
 
-		// Спецификация изменилась, проверяем на дубликаты
+		// Спецификация изменилась, проверяем на дубликаты по всем namespace
 		ruleList := &netguardv1alpha1.RuleS2SList{}
-		if err := v.Client.List(ctx, ruleList, client.InNamespace(newRule.Namespace)); err != nil {
+		if err := v.Client.List(ctx, ruleList); err != nil {
 			rules2slog.Error(err, "Failed to list RuleS2S objects")
 			return nil, fmt.Errorf("failed to check for duplicate rules: %w", err)
 		}

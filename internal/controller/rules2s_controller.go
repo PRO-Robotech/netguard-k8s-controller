@@ -432,7 +432,6 @@ func (r *RuleS2SReconciler) createOrUpdateIEAgAgRule(
 
 	// Generate rule name using the helper function
 	ruleName := r.generateRuleName(
-		ruleS2S.Name,
 		ruleS2S.Spec.Traffic,
 		localAG.Name,
 		targetAG.Name,
@@ -440,8 +439,7 @@ func (r *RuleS2SReconciler) createOrUpdateIEAgAgRule(
 
 	logger.Info("Generated rule name",
 		"ruleName", ruleName,
-		"input", fmt.Sprintf("%s-%s-%s-%s-%s",
-			ruleS2S.Name,
+		"input", fmt.Sprintf("%s-%s-%s-%s",
 			strings.ToLower(ruleS2S.Spec.Traffic),
 			localAG.Name,
 			targetAG.Name,
@@ -654,7 +652,6 @@ func (r *RuleS2SReconciler) createOrUpdateIEAgAgRule(
 
 // generateRuleName creates a deterministic rule name based on input parameters
 func (r *RuleS2SReconciler) generateRuleName(
-	ruleName string,
 	trafficDirection string,
 	localAGName string,
 	targetAGName string,
