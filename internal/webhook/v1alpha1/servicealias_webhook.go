@@ -160,12 +160,19 @@ func (v *ServiceAliasCustomValidator) ValidateDelete(ctx context.Context, obj ru
 
 		// Format local service references
 		if len(localServiceRefs) > 0 {
-			var localRules []string
+			var localRulesWithNamespace []string
 			for ruleName := range localServiceRefs {
-				localRules = append(localRules, ruleName)
+				// Find the rule to get its namespace
+				for _, rule := range ruleS2SList.Items {
+					if rule.Name == ruleName {
+						localRulesWithNamespace = append(localRulesWithNamespace,
+							fmt.Sprintf("%s in namespace %s", ruleName, rule.Namespace))
+						break
+					}
+				}
 			}
 			errorMsg += fmt.Sprintf("Cannot delete ServiceAlias %s: it is referenced by RuleS2S as local service:\n%s",
-				serviceAlias.Name, strings.Join(localRules, "\n"))
+				serviceAlias.Name, strings.Join(localRulesWithNamespace, "\n"))
 		}
 
 		// Format target service references
@@ -173,12 +180,19 @@ func (v *ServiceAliasCustomValidator) ValidateDelete(ctx context.Context, obj ru
 			if errorMsg != "" {
 				errorMsg += "\n\n"
 			}
-			var targetRules []string
+			var targetRulesWithNamespace []string
 			for ruleName := range targetServiceRefs {
-				targetRules = append(targetRules, ruleName)
+				// Find the rule to get its namespace
+				for _, rule := range ruleS2SList.Items {
+					if rule.Name == ruleName {
+						targetRulesWithNamespace = append(targetRulesWithNamespace,
+							fmt.Sprintf("%s in namespace %s", ruleName, rule.Namespace))
+						break
+					}
+				}
 			}
 			errorMsg += fmt.Sprintf("Cannot delete ServiceAlias %s: it is referenced by RuleS2S as target service:\n%s",
-				serviceAlias.Name, strings.Join(targetRules, "\n"))
+				serviceAlias.Name, strings.Join(targetRulesWithNamespace, "\n"))
 		}
 
 		servicealiaslog.Info("Cannot delete ServiceAlias: it is referenced by RuleS2S",

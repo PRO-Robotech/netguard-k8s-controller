@@ -72,15 +72,59 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, err
 	}
 
+	// Add finalizer if it doesn't exist
+	if !controllerutil.ContainsFinalizer(ruleS2S, "netguard.sgroups.io/finalizer") {
+		logger.Info("Adding finalizer to RuleS2S", "name", ruleS2S.Name)
+		controllerutil.AddFinalizer(ruleS2S, "netguard.sgroups.io/finalizer")
+		if err := UpdateWithRetry(ctx, r.Client, ruleS2S, DefaultMaxRetries); err != nil {
+			logger.Error(err, "Failed to add finalizer to RuleS2S")
+			return ctrl.Result{}, err
+		}
+		// Return to avoid processing the same object twice in one reconciliation
+		return ctrl.Result{}, nil
+	}
+
 	// Check if the resource is being deleted
 	if !ruleS2S.DeletionTimestamp.IsZero() {
 		// Delete related IEAgAgRules
 		if err := r.deleteRelatedIEAgAgRules(ctx, ruleS2S); err != nil {
+			// Check if this is our custom error type
+			if failedErr, ok := err.(*FailedToDeleteRulesError); ok {
+				// Update status with error condition
+				errorMsg := fmt.Sprintf("Cannot delete RuleS2S because some IEAgAgRules could not be deleted: %s",
+					strings.Join(failedErr.FailedRules, ", "))
+
+				meta.SetStatusCondition(&ruleS2S.Status.Conditions, metav1.Condition{
+					Type:    netguardv1alpha1.ConditionReady,
+					Status:  metav1.ConditionFalse,
+					Reason:  "FailedToDeleteRules",
+					Message: errorMsg,
+				})
+
+				if updateErr := UpdateStatusWithRetry(ctx, r.Client, ruleS2S, DefaultMaxRetries); updateErr != nil {
+					logger.Error(updateErr, "Failed to update RuleS2S status")
+				}
+
+				logger.Error(err, "Failed to delete all related IEAgAgRules",
+					"failedRules", strings.Join(failedErr.FailedRules, ", "))
+
+				return ctrl.Result{}, nil
+			}
+
+			// For other errors, log and return the error
 			logger.Error(err, "Failed to delete related IEAgAgRules")
 			return ctrl.Result{}, err
 		}
 
-		// Resource is being deleted, no need to do anything else
+		// All related IEAgAgRules have been deleted, now remove the finalizer
+		logger.Info("Removing finalizer from RuleS2S", "name", ruleS2S.Name)
+		controllerutil.RemoveFinalizer(ruleS2S, "netguard.sgroups.io/finalizer")
+		if err := UpdateWithRetry(ctx, r.Client, ruleS2S, DefaultMaxRetries); err != nil {
+			logger.Error(err, "Failed to remove finalizer from RuleS2S")
+			return ctrl.Result{}, err
+		}
+
+		// Resource is being deleted and finalizer has been removed
 		return ctrl.Result{}, nil
 	}
 
@@ -854,7 +898,18 @@ func (r *RuleS2SReconciler) getExistingIEAgAgRules(ctx context.Context, ruleS2S 
 	return relatedRules, nil
 }
 
+// FailedToDeleteRulesError is a custom error type for failed rule deletions
+type FailedToDeleteRulesError struct {
+	FailedRules []string
+}
+
+// Error implements the error interface
+func (e *FailedToDeleteRulesError) Error() string {
+	return fmt.Sprintf("failed to delete the following IEAgAgRules: %s", strings.Join(e.FailedRules, ", "))
+}
+
 // deleteRelatedIEAgAgRules deletes all IEAgAgRules that have an OwnerReference to the given RuleS2S
+// Returns a FailedToDeleteRulesError if any rules could not be deleted
 func (r *RuleS2SReconciler) deleteRelatedIEAgAgRules(ctx context.Context, ruleS2S *netguardv1alpha1.RuleS2S) error {
 	logger := log.FromContext(ctx)
 
@@ -867,10 +922,13 @@ func (r *RuleS2SReconciler) deleteRelatedIEAgAgRules(ctx context.Context, ruleS2
 	logger.Info("Deleting IEAgAgRules")
 	logger.Info("Deleting rule", "ruleName", ruleS2S.GetName(), "uuid", ruleS2S.GetUID())
 	logger.Info("ieAgAgRuleList", "listNumber", len(ieAgAgRuleList.Items))
+
+	var failedRules []string
+
 	// Check each rule for an OwnerReference to this RuleS2S
 	for _, rule := range ieAgAgRuleList.Items {
 		for _, ownerRef := range rule.GetOwnerReferences() {
-			logger.Info("Deleting rule", "Kind", ownerRef.Kind, "uuid", ownerRef.UID)
+			logger.Info("Checking rule", "Kind", ownerRef.Kind, "uuid", ownerRef.UID)
 			if ownerRef.UID == ruleS2S.GetUID() &&
 				ownerRef.Kind == "RuleS2S" &&
 				ownerRef.APIVersion == netguardv1alpha1.GroupVersion.String() {
@@ -878,16 +936,41 @@ func (r *RuleS2SReconciler) deleteRelatedIEAgAgRules(ctx context.Context, ruleS2
 				// Found a rule that references this RuleS2S
 				logger.Info("Deleting related IEAgAgRule", "name", rule.Name, "namespace", rule.Namespace)
 
-				// Delete the rule
-				if err := r.Delete(ctx, &rule); err != nil {
+				// First, remove the finalizer if it exists
+				ruleCopy := rule.DeepCopy()
+				if controllerutil.ContainsFinalizer(ruleCopy, "provider.sgroups.io/finalizer") {
+					logger.Info("Removing finalizer from IEAgAgRule", "name", ruleCopy.Name, "namespace", ruleCopy.Namespace)
+					controllerutil.RemoveFinalizer(ruleCopy, "provider.sgroups.io/finalizer")
+
+					// Update the rule to remove the finalizer with retry
+					if err := UpdateWithRetry(ctx, r.Client, ruleCopy, DefaultMaxRetries); err != nil {
+						if !errors.IsNotFound(err) {
+							logger.Error(err, "Failed to remove finalizer from IEAgAgRule",
+								"name", ruleCopy.Name, "namespace", ruleCopy.Namespace)
+							// Continue with deletion attempt even if finalizer removal fails
+						}
+					}
+				}
+
+				// Then delete the rule
+				if err := r.Delete(ctx, ruleCopy); err != nil {
 					if !errors.IsNotFound(err) {
 						logger.Error(err, "Failed to delete related IEAgAgRule",
-							"name", rule.Name, "namespace", rule.Namespace)
-						return err
+							"name", ruleCopy.Name, "namespace", ruleCopy.Namespace)
+						// Add to failed rules list instead of returning immediately
+						failedRules = append(failedRules, fmt.Sprintf("%s/%s", ruleCopy.Namespace, ruleCopy.Name))
 					}
 				}
 			}
 		}
+	}
+
+	// If any rules failed to delete, return a custom error
+	if len(failedRules) > 0 {
+		logger.Error(fmt.Errorf("failed to delete some IEAgAgRules"),
+			"Some IEAgAgRules could not be deleted",
+			"failedRules", strings.Join(failedRules, ", "))
+		return &FailedToDeleteRulesError{FailedRules: failedRules}
 	}
 
 	return nil

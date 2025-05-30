@@ -206,7 +206,7 @@ func (v *ServiceCustomValidator) ValidateDelete(ctx context.Context, obj runtime
 			if rule.Spec.ServiceLocalRef.Name == alias.Name &&
 				rule.Namespace == alias.Namespace {
 				aliasesWithRules[alias.Name] = append(aliasesWithRules[alias.Name],
-					fmt.Sprintf("RuleS2S '%s' (as local service)", rule.Name))
+					fmt.Sprintf("RuleS2S '%s' in namespace '%s' (as local service)", rule.Name, rule.Namespace))
 			}
 
 			// Check if the rule references this alias as target service
@@ -214,7 +214,7 @@ func (v *ServiceCustomValidator) ValidateDelete(ctx context.Context, obj runtime
 			if rule.Spec.ServiceRef.Name == alias.Name &&
 				targetNamespace == alias.Namespace {
 				aliasesWithRules[alias.Name] = append(aliasesWithRules[alias.Name],
-					fmt.Sprintf("RuleS2S '%s' (as target service)", rule.Name))
+					fmt.Sprintf("RuleS2S '%s' in namespace '%s' (as target service)", rule.Name, rule.Namespace))
 			}
 		}
 	}
