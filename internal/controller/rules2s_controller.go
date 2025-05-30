@@ -249,36 +249,6 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	localAddressGroups := localService.AddressGroups.Items
 	targetAddressGroups := targetService.AddressGroups.Items
 
-	if len(localAddressGroups) == 0 || len(targetAddressGroups) == 0 {
-		// Определяем, у какого именно сервиса отсутствуют адресные группы
-		var missingAddressGroupsMsg string
-		if len(localAddressGroups) == 0 && len(targetAddressGroups) == 0 {
-			missingAddressGroupsMsg = fmt.Sprintf("Both services have no address groups: localService '%s', targetService '%s'", localService.Name, targetService.Name)
-		} else if len(localAddressGroups) == 0 {
-			missingAddressGroupsMsg = fmt.Sprintf("LocalService '%s' has no address groups", localService.Name)
-		} else {
-			missingAddressGroupsMsg = fmt.Sprintf("TargetService '%s' has no address groups", targetService.Name)
-		}
-
-		meta.SetStatusCondition(&ruleS2S.Status.Conditions, metav1.Condition{
-			Type:    netguardv1alpha1.ConditionReady,
-			Status:  metav1.ConditionTrue,
-			Reason:  "ValidConfiguration",
-			Message: fmt.Sprintf("Rule is valid but inactive: %s", missingAddressGroupsMsg),
-		})
-		if err := UpdateStatusWithRetry(ctx, r.Client, ruleS2S, DefaultMaxRetries); err != nil {
-			logger.Error(err, "Failed to update RuleS2S status")
-		}
-
-		// Логируем информацию, но НЕ ставим в очередь повторно
-		logger.Info(missingAddressGroupsMsg,
-			"localService", localService.Name,
-			"targetService", targetService.Name)
-
-		// Возвращаем пустой Result без RequeueAfter
-		return ctrl.Result{}, nil
-	}
-
 	// Determine which ports to use based on traffic direction
 	// In both cases, we use ports from the service that receives the traffic
 	var ports []netguardv1alpha1.IngressPort
@@ -290,8 +260,24 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		ports = targetService.Spec.IngressPorts
 	}
 
+	// Collect all inactive conditions
+	var inactiveConditions []string
+
+	// Check address groups
+	if len(localAddressGroups) == 0 && len(targetAddressGroups) == 0 {
+		inactiveConditions = append(inactiveConditions,
+			fmt.Sprintf("Both services have no address groups: localService '%s', targetService '%s'",
+				localService.Name, targetService.Name))
+	} else if len(localAddressGroups) == 0 {
+		inactiveConditions = append(inactiveConditions,
+			fmt.Sprintf("LocalService '%s' has no address groups", localService.Name))
+	} else if len(targetAddressGroups) == 0 {
+		inactiveConditions = append(inactiveConditions,
+			fmt.Sprintf("TargetService '%s' has no address groups", targetService.Name))
+	}
+
+	// Check ports
 	if len(ports) == 0 {
-		// Определяем, для какого сервиса не определены порты
 		var serviceName string
 		if strings.ToLower(ruleS2S.Spec.Traffic) == "ingress" {
 			serviceName = fmt.Sprintf("local service '%s'", localService.Name)
@@ -299,21 +285,39 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			serviceName = fmt.Sprintf("target service '%s'", targetService.Name)
 		}
 
-		infoMsg := fmt.Sprintf("No ports defined for the %s (traffic direction: %s)",
-			serviceName, ruleS2S.Spec.Traffic)
+		inactiveConditions = append(inactiveConditions,
+			fmt.Sprintf("No ports defined for the %s (traffic direction: %s)",
+				serviceName, ruleS2S.Spec.Traffic))
+	}
+
+	// If there are any inactive conditions, set status and return
+	if len(inactiveConditions) > 0 {
+		// Format the message with line breaks
+		var formattedMessage strings.Builder
+		formattedMessage.WriteString("Rule is valid but inactive due to the following reasons:\n")
+
+		for i, condition := range inactiveConditions {
+			formattedMessage.WriteString(fmt.Sprintf("%d. %s", i+1, condition))
+			if i < len(inactiveConditions)-1 {
+				formattedMessage.WriteString("\n")
+			}
+		}
 
 		meta.SetStatusCondition(&ruleS2S.Status.Conditions, metav1.Condition{
 			Type:    netguardv1alpha1.ConditionReady,
 			Status:  metav1.ConditionTrue,
 			Reason:  "ValidConfiguration",
-			Message: fmt.Sprintf("Rule is valid but inactive: %s", infoMsg),
+			Message: formattedMessage.String(),
 		})
 		if err := UpdateStatusWithRetry(ctx, r.Client, ruleS2S, DefaultMaxRetries); err != nil {
 			logger.Error(err, "Failed to update RuleS2S status")
 		}
 
 		// Логируем информацию
-		logger.Info(infoMsg, "traffic", ruleS2S.Spec.Traffic)
+		logger.Info("Rule is valid but inactive",
+			"conditions", strings.Join(inactiveConditions, "; "),
+			"localService", localService.Name,
+			"targetService", targetService.Name)
 
 		// Возвращаем пустой Result без RequeueAfter
 		return ctrl.Result{}, nil
