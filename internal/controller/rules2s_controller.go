@@ -260,12 +260,11 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			missingAddressGroupsMsg = fmt.Sprintf("TargetService '%s' has no address groups", targetService.Name)
 		}
 
-		// Update status with error condition
 		meta.SetStatusCondition(&ruleS2S.Status.Conditions, metav1.Condition{
 			Type:    netguardv1alpha1.ConditionReady,
-			Status:  metav1.ConditionFalse,
-			Reason:  "NoAddressGroups",
-			Message: missingAddressGroupsMsg,
+			Status:  metav1.ConditionTrue,
+			Reason:  "ValidConfiguration",
+			Message: fmt.Sprintf("Rule is valid but inactive: %s", missingAddressGroupsMsg),
 		})
 		if err := UpdateStatusWithRetry(ctx, r.Client, ruleS2S, DefaultMaxRetries); err != nil {
 			logger.Error(err, "Failed to update RuleS2S status")
@@ -300,22 +299,21 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			serviceName = fmt.Sprintf("target service '%s'", targetService.Name)
 		}
 
-		errorMsg := fmt.Sprintf("No ports defined for the %s (traffic direction: %s)",
+		infoMsg := fmt.Sprintf("No ports defined for the %s (traffic direction: %s)",
 			serviceName, ruleS2S.Spec.Traffic)
 
-		// Update status with error condition
 		meta.SetStatusCondition(&ruleS2S.Status.Conditions, metav1.Condition{
 			Type:    netguardv1alpha1.ConditionReady,
-			Status:  metav1.ConditionFalse,
-			Reason:  "NoPorts",
-			Message: errorMsg,
+			Status:  metav1.ConditionTrue,
+			Reason:  "ValidConfiguration",
+			Message: fmt.Sprintf("Rule is valid but inactive: %s", infoMsg),
 		})
 		if err := UpdateStatusWithRetry(ctx, r.Client, ruleS2S, DefaultMaxRetries); err != nil {
 			logger.Error(err, "Failed to update RuleS2S status")
 		}
 
 		// Логируем информацию
-		logger.Info(errorMsg, "traffic", ruleS2S.Spec.Traffic)
+		logger.Info(infoMsg, "traffic", ruleS2S.Spec.Traffic)
 
 		// Возвращаем пустой Result без RequeueAfter
 		return ctrl.Result{}, nil
