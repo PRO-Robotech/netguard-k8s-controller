@@ -292,14 +292,14 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	// If there are any inactive conditions, set status and return
 	if len(inactiveConditions) > 0 {
-		// Format the message with line breaks
+		// Format the message without numbering and extra line breaks
 		var formattedMessage strings.Builder
-		formattedMessage.WriteString("Rule is valid but inactive due to the following reasons:\n")
+		formattedMessage.WriteString("Rule is valid but inactive due to the following reasons: ")
 
 		for i, condition := range inactiveConditions {
-			formattedMessage.WriteString(fmt.Sprintf("%d. %s", i+1, condition))
+			formattedMessage.WriteString(condition)
 			if i < len(inactiveConditions)-1 {
-				formattedMessage.WriteString("\n")
+				formattedMessage.WriteString("; ")
 			}
 		}
 
