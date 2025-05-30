@@ -105,6 +105,8 @@ func IsReadyConditionTrue(obj runtime.Object) bool {
 		return isConditionTrue(o.Status.Conditions, netguardv1alpha1.ConditionReady)
 	case *netguardv1alpha1.Service:
 		return isConditionTrue(o.Status.Conditions, netguardv1alpha1.ConditionReady)
+	case *netguardv1alpha1.ServiceAlias:
+		return isConditionTrue(o.Status.Conditions, netguardv1alpha1.ConditionReady)
 	case *netguardv1alpha1.AddressGroupPortMapping:
 		return isConditionTrue(o.Status.Conditions, netguardv1alpha1.ConditionReady)
 	case *netguardv1alpha1.AddressGroupBindingPolicy:
