@@ -70,6 +70,29 @@ func (v *AddressGroupBindingCustomValidator) ValidateCreate(ctx context.Context,
 		return nil, fmt.Errorf("expected a AddressGroupBinding object but got %T", obj)
 	}
 
+	// Проверка на существование дубликатов по всем namespace
+	bindingList := &netguardv1alpha1.AddressGroupBindingList{}
+	if err := v.Client.List(ctx, bindingList); err != nil {
+		addressgroupbindinglog.Error(err, "Failed to list AddressGroupBinding objects")
+		return nil, fmt.Errorf("failed to check for duplicate bindings: %w", err)
+	}
+
+	for _, existingBinding := range bindingList.Items {
+		// Пропускаем ресурсы, которые находятся в процессе удаления
+		if !existingBinding.DeletionTimestamp.IsZero() {
+			continue
+		}
+
+		// Проверяем, совпадают ли ключевые поля спецификации
+		if existingBinding.Spec.ServiceRef.GetName() == binding.Spec.ServiceRef.GetName() &&
+			existingBinding.Spec.AddressGroupRef.GetName() == binding.Spec.AddressGroupRef.GetName() &&
+			existingBinding.Spec.AddressGroupRef.ResolveNamespace(existingBinding.Namespace) == binding.Spec.AddressGroupRef.ResolveNamespace(binding.Namespace) {
+
+			return nil, fmt.Errorf("duplicate AddressGroupBinding detected: a binding with the same specification already exists: %s/%s",
+				existingBinding.Namespace, existingBinding.Name)
+		}
+	}
+
 	// TEMPORARY-DEBUG-CODE: Enhanced logging for problematic resources
 	if binding.Name == "dynamic-2rx8z" || binding.Name == "dynamic-7dls7" ||
 		binding.Name == "dynamic-fb5qw" || binding.Name == "dynamic-g6jfj" ||
@@ -238,6 +261,40 @@ func (v *AddressGroupBindingCustomValidator) ValidateUpdate(ctx context.Context,
 	// Check that spec hasn't changed when Ready condition is true
 	if err := ValidateSpecNotChangedWhenReady(oldObj, newObj, oldBinding.Spec, newBinding.Spec); err != nil {
 		return nil, err
+	}
+
+	// Проверяем, изменились ли ключевые поля спецификации
+	if oldBinding.Spec.ServiceRef.GetName() != newBinding.Spec.ServiceRef.GetName() ||
+		oldBinding.Spec.AddressGroupRef.GetName() != newBinding.Spec.AddressGroupRef.GetName() ||
+		oldBinding.Spec.AddressGroupRef.ResolveNamespace(oldBinding.Namespace) != newBinding.Spec.AddressGroupRef.ResolveNamespace(newBinding.Namespace) {
+
+		// Спецификация изменилась, проверяем на дубликаты по всем namespace
+		bindingList := &netguardv1alpha1.AddressGroupBindingList{}
+		if err := v.Client.List(ctx, bindingList); err != nil {
+			addressgroupbindinglog.Error(err, "Failed to list AddressGroupBinding objects")
+			return nil, fmt.Errorf("failed to check for duplicate bindings: %w", err)
+		}
+
+		for _, existingBinding := range bindingList.Items {
+			// Пропускаем ресурсы, которые находятся в процессе удаления
+			if !existingBinding.DeletionTimestamp.IsZero() {
+				continue
+			}
+
+			// Пропускаем сам обновляемый объект
+			if existingBinding.Name == newBinding.Name && existingBinding.Namespace == newBinding.Namespace {
+				continue
+			}
+
+			// Проверяем, совпадают ли ключевые поля спецификации
+			if existingBinding.Spec.ServiceRef.GetName() == newBinding.Spec.ServiceRef.GetName() &&
+				existingBinding.Spec.AddressGroupRef.GetName() == newBinding.Spec.AddressGroupRef.GetName() &&
+				existingBinding.Spec.AddressGroupRef.ResolveNamespace(existingBinding.Namespace) == newBinding.Spec.AddressGroupRef.ResolveNamespace(newBinding.Namespace) {
+
+				return nil, fmt.Errorf("duplicate AddressGroupBinding detected: a binding with the same specification already exists: %s/%s",
+					existingBinding.Namespace, existingBinding.Name)
+			}
+		}
 	}
 
 	// 1.2 Check if Service exists
