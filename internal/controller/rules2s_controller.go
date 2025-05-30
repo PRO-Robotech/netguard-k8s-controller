@@ -90,19 +90,25 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		Namespace: ruleS2S.Namespace,
 		Name:      ruleS2S.Spec.ServiceLocalRef.Name,
 	}, localServiceAlias); err != nil {
+		errorMsg := fmt.Sprintf("Local service alias '%s' not found in namespace '%s': %v",
+			ruleS2S.Spec.ServiceLocalRef.Name, ruleS2S.Namespace, err)
+
 		// Update status with error condition
 		meta.SetStatusCondition(&ruleS2S.Status.Conditions, metav1.Condition{
 			Type:    netguardv1alpha1.ConditionReady,
 			Status:  metav1.ConditionFalse,
 			Reason:  "ServiceAliasNotFound",
-			Message: fmt.Sprintf("Local service alias not found: %v", err),
+			Message: errorMsg,
 		})
 		if err := UpdateStatusWithRetry(ctx, r.Client, ruleS2S, DefaultMaxRetries); err != nil {
 			logger.Error(err, "Failed to update RuleS2S status")
 		}
-		// Return only RequeueAfter without the error to avoid warning
-		logger.Info("Local service alias not found, will retry later", "name", ruleS2S.Spec.ServiceLocalRef.Name)
-		return ctrl.Result{RequeueAfter: time.Minute}, nil
+
+		// Логируем информацию
+		logger.Info(errorMsg, "name", ruleS2S.Spec.ServiceLocalRef.Name)
+
+		// Возвращаем пустой Result без RequeueAfter
+		return ctrl.Result{}, nil
 	}
 
 	targetServiceAlias := &netguardv1alpha1.ServiceAlias{}
@@ -111,19 +117,25 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		Namespace: targetNamespace,
 		Name:      ruleS2S.Spec.ServiceRef.Name,
 	}, targetServiceAlias); err != nil {
+		errorMsg := fmt.Sprintf("Target service alias '%s' not found in namespace '%s': %v",
+			ruleS2S.Spec.ServiceRef.Name, targetNamespace, err)
+
 		// Update status with error condition
 		meta.SetStatusCondition(&ruleS2S.Status.Conditions, metav1.Condition{
 			Type:    netguardv1alpha1.ConditionReady,
 			Status:  metav1.ConditionFalse,
 			Reason:  "ServiceAliasNotFound",
-			Message: fmt.Sprintf("Target service alias not found: %v", err),
+			Message: errorMsg,
 		})
 		if err := UpdateStatusWithRetry(ctx, r.Client, ruleS2S, DefaultMaxRetries); err != nil {
 			logger.Error(err, "Failed to update RuleS2S status")
 		}
-		// Return only RequeueAfter without the error to avoid warning
-		logger.Info("Target service alias not found, will retry later", "name", ruleS2S.Spec.ServiceRef.Name, "namespace", targetNamespace)
-		return ctrl.Result{RequeueAfter: time.Minute}, nil
+
+		// Логируем информацию
+		logger.Info(errorMsg, "name", ruleS2S.Spec.ServiceRef.Name, "namespace", targetNamespace)
+
+		// Возвращаем пустой Result без RequeueAfter
+		return ctrl.Result{}, nil
 	}
 
 	// Get the actual Service objects
@@ -133,19 +145,25 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		Namespace: localServiceNamespace,
 		Name:      localServiceAlias.Spec.ServiceRef.Name,
 	}, localService); err != nil {
+		errorMsg := fmt.Sprintf("Local service '%s' not found in namespace '%s' (referenced by ServiceAlias '%s'): %v",
+			localServiceAlias.Spec.ServiceRef.Name, localServiceNamespace, localServiceAlias.Name, err)
+
 		// Update status with error condition
 		meta.SetStatusCondition(&ruleS2S.Status.Conditions, metav1.Condition{
 			Type:    netguardv1alpha1.ConditionReady,
 			Status:  metav1.ConditionFalse,
 			Reason:  "ServiceNotFound",
-			Message: fmt.Sprintf("Local service not found: %v", err),
+			Message: errorMsg,
 		})
 		if err := UpdateStatusWithRetry(ctx, r.Client, ruleS2S, DefaultMaxRetries); err != nil {
 			logger.Error(err, "Failed to update RuleS2S status")
 		}
-		// Return only RequeueAfter without the error to avoid warning
-		logger.Info("Local service not found, will retry later", "name", localServiceAlias.Spec.ServiceRef.Name, "namespace", localServiceNamespace)
-		return ctrl.Result{RequeueAfter: time.Minute}, nil
+
+		// Логируем информацию
+		logger.Info(errorMsg, "name", localServiceAlias.Spec.ServiceRef.Name, "namespace", localServiceNamespace)
+
+		// Возвращаем пустой Result без RequeueAfter
+		return ctrl.Result{}, nil
 	}
 
 	targetService := &netguardv1alpha1.Service{}
@@ -154,19 +172,25 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		Namespace: targetServiceNamespace,
 		Name:      targetServiceAlias.Spec.ServiceRef.Name,
 	}, targetService); err != nil {
+		errorMsg := fmt.Sprintf("Target service '%s' not found in namespace '%s' (referenced by ServiceAlias '%s'): %v",
+			targetServiceAlias.Spec.ServiceRef.Name, targetServiceNamespace, targetServiceAlias.Name, err)
+
 		// Update status with error condition
 		meta.SetStatusCondition(&ruleS2S.Status.Conditions, metav1.Condition{
 			Type:    netguardv1alpha1.ConditionReady,
 			Status:  metav1.ConditionFalse,
 			Reason:  "ServiceNotFound",
-			Message: fmt.Sprintf("Target service not found: %v", err),
+			Message: errorMsg,
 		})
 		if err := UpdateStatusWithRetry(ctx, r.Client, ruleS2S, DefaultMaxRetries); err != nil {
 			logger.Error(err, "Failed to update RuleS2S status")
 		}
-		// Return only RequeueAfter without the error to avoid warning
-		logger.Info("Target service not found, will retry later", "name", targetServiceAlias.Spec.ServiceRef.Name, "namespace", targetServiceNamespace)
-		return ctrl.Result{RequeueAfter: time.Minute}, nil
+
+		// Логируем информацию
+		logger.Info(errorMsg, "name", targetServiceAlias.Spec.ServiceRef.Name, "namespace", targetServiceNamespace)
+
+		// Возвращаем пустой Result без RequeueAfter
+		return ctrl.Result{}, nil
 	}
 
 	// Update RuleS2SDstOwnRef for cross-namespace references
@@ -192,19 +216,32 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 				})
 
 			if err := UpdateWithRetry(ctx, r.Client, targetService, DefaultMaxRetries); err != nil {
-				logger.Error(err, "Failed to update target service RuleS2SDstOwnRef")
-				return ctrl.Result{RequeueAfter: time.Minute}, err
+				errorMsg := fmt.Sprintf("Failed to update target service '%s' RuleS2SDstOwnRef: %v", targetService.Name, err)
+				logger.Error(err, errorMsg)
+
+				// Проверяем, нужна ли периодическая проверка для этого правила
+				if val, ok := ruleS2S.Annotations["netguard.sgroups.io/periodic-reconcile"]; ok && val == "true" {
+					return ctrl.Result{RequeueAfter: time.Minute}, err
+				}
+
+				return ctrl.Result{}, err
 			}
 		}
 	} else {
 		// For rules in the same namespace, use owner references
 		if err := controllerutil.SetControllerReference(targetService, ruleS2S, r.Scheme); err != nil {
-			logger.Error(err, "Failed to set owner reference")
-			return ctrl.Result{RequeueAfter: time.Minute}, err
+			errorMsg := fmt.Sprintf("Failed to set owner reference from target service '%s' to RuleS2S '%s': %v",
+				targetService.Name, ruleS2S.Name, err)
+			logger.Error(err, errorMsg)
+
+			return ctrl.Result{}, err
 		}
 		if err := UpdateWithRetry(ctx, r.Client, ruleS2S, DefaultMaxRetries); err != nil {
-			logger.Error(err, "Failed to update RuleS2S with owner reference")
-			return ctrl.Result{RequeueAfter: time.Minute}, err
+			errorMsg := fmt.Sprintf("Failed to update RuleS2S '%s' with owner reference to service '%s': %v",
+				ruleS2S.Name, targetService.Name, err)
+			logger.Error(err, errorMsg)
+
+			return ctrl.Result{}, err
 		}
 	}
 
@@ -213,21 +250,34 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	targetAddressGroups := targetService.AddressGroups.Items
 
 	if len(localAddressGroups) == 0 || len(targetAddressGroups) == 0 {
+		// Определяем, у какого именно сервиса отсутствуют адресные группы
+		var missingAddressGroupsMsg string
+		if len(localAddressGroups) == 0 && len(targetAddressGroups) == 0 {
+			missingAddressGroupsMsg = fmt.Sprintf("Both services have no address groups: localService '%s', targetService '%s'", localService.Name, targetService.Name)
+		} else if len(localAddressGroups) == 0 {
+			missingAddressGroupsMsg = fmt.Sprintf("LocalService '%s' has no address groups", localService.Name)
+		} else {
+			missingAddressGroupsMsg = fmt.Sprintf("TargetService '%s' has no address groups", targetService.Name)
+		}
+
 		// Update status with error condition
 		meta.SetStatusCondition(&ruleS2S.Status.Conditions, metav1.Condition{
 			Type:    netguardv1alpha1.ConditionReady,
 			Status:  metav1.ConditionFalse,
 			Reason:  "NoAddressGroups",
-			Message: "One or both services have no address groups",
+			Message: missingAddressGroupsMsg,
 		})
 		if err := UpdateStatusWithRetry(ctx, r.Client, ruleS2S, DefaultMaxRetries); err != nil {
 			logger.Error(err, "Failed to update RuleS2S status")
 		}
-		// Return only RequeueAfter without the error to avoid warning
-		logger.Info("One or both services have no address groups, will retry later",
+
+		// Логируем информацию, но НЕ ставим в очередь повторно
+		logger.Info(missingAddressGroupsMsg,
 			"localService", localService.Name,
 			"targetService", targetService.Name)
-		return ctrl.Result{RequeueAfter: time.Minute}, nil
+
+		// Возвращаем пустой Result без RequeueAfter
+		return ctrl.Result{}, nil
 	}
 
 	// Determine which ports to use based on traffic direction
@@ -242,20 +292,33 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	if len(ports) == 0 {
+		// Определяем, для какого сервиса не определены порты
+		var serviceName string
+		if strings.ToLower(ruleS2S.Spec.Traffic) == "ingress" {
+			serviceName = fmt.Sprintf("local service '%s'", localService.Name)
+		} else {
+			serviceName = fmt.Sprintf("target service '%s'", targetService.Name)
+		}
+
+		errorMsg := fmt.Sprintf("No ports defined for the %s (traffic direction: %s)",
+			serviceName, ruleS2S.Spec.Traffic)
+
 		// Update status with error condition
 		meta.SetStatusCondition(&ruleS2S.Status.Conditions, metav1.Condition{
 			Type:    netguardv1alpha1.ConditionReady,
 			Status:  metav1.ConditionFalse,
 			Reason:  "NoPorts",
-			Message: "No ports defined for the service",
+			Message: errorMsg,
 		})
 		if err := UpdateStatusWithRetry(ctx, r.Client, ruleS2S, DefaultMaxRetries); err != nil {
 			logger.Error(err, "Failed to update RuleS2S status")
 		}
-		// Return only RequeueAfter without the error to avoid warning
-		logger.Info("No ports defined for the service, will retry later",
-			"traffic", ruleS2S.Spec.Traffic)
-		return ctrl.Result{RequeueAfter: time.Minute}, nil
+
+		// Логируем информацию
+		logger.Info(errorMsg, "traffic", ruleS2S.Spec.Traffic)
+
+		// Возвращаем пустой Result без RequeueAfter
+		return ctrl.Result{}, nil
 	}
 
 	// Get all existing IEAgAgRules for this RuleS2S
@@ -429,18 +492,29 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			return ctrl.Result{}, err
 		}
 	} else {
+		errorMsg := fmt.Sprintf("Failed to create any rules for RuleS2S '%s' (local service: '%s', target service: '%s')",
+			ruleS2S.Name, localService.Name, targetService.Name)
+
 		meta.SetStatusCondition(&ruleS2S.Status.Conditions, metav1.Condition{
 			Type:    netguardv1alpha1.ConditionReady,
 			Status:  metav1.ConditionFalse,
 			Reason:  "NoRulesCreated",
-			Message: "Failed to create any rules",
+			Message: errorMsg,
 		})
 		if err := UpdateStatusWithRetry(ctx, r.Client, ruleS2S, DefaultMaxRetries); err != nil {
 			logger.Error(err, "Failed to update RuleS2S status")
 		}
-		// Return only RequeueAfter without the error to avoid warning
-		logger.Info("Failed to create any rules, will retry later")
-		return ctrl.Result{RequeueAfter: time.Minute}, nil
+
+		// Логируем информацию
+		logger.Info(errorMsg,
+			"localService", localService.Name,
+			"targetService", targetService.Name,
+			"localAddressGroups", len(localAddressGroups),
+			"targetAddressGroups", len(targetAddressGroups),
+			"ports", len(ports))
+
+		// Возвращаем пустой Result без RequeueAfter
+		return ctrl.Result{}, nil
 	}
 
 	return ctrl.Result{}, nil
