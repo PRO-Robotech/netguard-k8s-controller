@@ -258,6 +258,17 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{RequeueAfter: time.Minute}, nil
 	}
 
+	// Get all existing IEAgAgRules for this RuleS2S
+	existingRules, err := r.getExistingIEAgAgRules(ctx, ruleS2S)
+	if err != nil {
+		logger.Error(err, "Failed to get existing IEAgAg rules")
+		return ctrl.Result{}, err
+	}
+
+	// Create a map to track which rules should exist after reconciliation
+	// The key is "namespace/name" to uniquely identify each rule
+	expectedRules := make(map[string]bool)
+
 	// Create IEAgAgRule resources for each combination of address groups and ports
 	logger.Info("Starting rule creation for RuleS2S",
 		"name", ruleS2S.Name,
@@ -265,7 +276,8 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		"uid", ruleS2S.GetUID(),
 		"localAddressGroups", len(localAddressGroups),
 		"targetAddressGroups", len(targetAddressGroups),
-		"ports", len(ports))
+		"ports", len(ports),
+		"existingRules", len(existingRules))
 
 	createdRules := []string{}
 	for i, localAG := range localAddressGroups {
@@ -313,8 +325,24 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 						"errorType", fmt.Sprintf("%T", err))
 					continue
 				}
+
+				// Determine namespace for the rule based on traffic direction
+				var ruleNamespace string
+				if ruleS2S.Spec.Traffic == "ingress" {
+					// For ingress, rule goes in the local AG namespace (receiver)
+					ruleNamespace = localAG.ResolveNamespace(ruleS2S.GetNamespace())
+				} else {
+					// For egress, rule goes in the target AG namespace (receiver)
+					ruleNamespace = targetAG.ResolveNamespace(ruleS2S.GetNamespace())
+				}
+
+				// Add to expected rules map
+				expectedRuleKey := fmt.Sprintf("%s/%s", ruleNamespace, ruleName)
+				expectedRules[expectedRuleKey] = true
+
 				logger.Info("Successfully created/updated TCP rule",
 					"ruleName", ruleName,
+					"ruleNamespace", ruleNamespace,
 					"localAG", localAG.Name,
 					"targetAG", targetAG.Name)
 				createdRules = append(createdRules, ruleName)
@@ -340,8 +368,23 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 						"errorType", fmt.Sprintf("%T", err))
 					continue
 				}
+				// Determine namespace for the rule based on traffic direction
+				var ruleNamespace string
+				if ruleS2S.Spec.Traffic == "ingress" {
+					// For ingress, rule goes in the local AG namespace (receiver)
+					ruleNamespace = localAG.ResolveNamespace(ruleS2S.GetNamespace())
+				} else {
+					// For egress, rule goes in the target AG namespace (receiver)
+					ruleNamespace = targetAG.ResolveNamespace(ruleS2S.GetNamespace())
+				}
+
+				// Add to expected rules map
+				expectedRuleKey := fmt.Sprintf("%s/%s", ruleNamespace, ruleName)
+				expectedRules[expectedRuleKey] = true
+
 				logger.Info("Successfully created/updated UDP rule",
 					"ruleName", ruleName,
+					"ruleNamespace", ruleNamespace,
 					"localAG", localAG.Name,
 					"targetAG", targetAG.Name)
 				createdRules = append(createdRules, ruleName)
@@ -353,6 +396,25 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		"name", ruleS2S.Name,
 		"createdRules", len(createdRules),
 		"ruleNames", strings.Join(createdRules, ", "))
+
+	// Delete rules that are no longer needed
+	for _, rule := range existingRules {
+		key := fmt.Sprintf("%s/%s", rule.Namespace, rule.Name)
+		if !expectedRules[key] {
+			logger.Info("Deleting obsolete IEAgAg rule",
+				"name", rule.Name,
+				"namespace", rule.Namespace,
+				"reason", "AddressGroup removed from Service or no longer needed")
+
+			if err := r.Delete(ctx, &rule); err != nil {
+				if !errors.IsNotFound(err) {
+					logger.Error(err, "Failed to delete obsolete IEAgAg rule",
+						"name", rule.Name, "namespace", rule.Namespace)
+					// Don't return error to avoid blocking reconciliation of other rules
+				}
+			}
+		}
+	}
 
 	// Update status to Ready if we created at least one rule
 	if len(createdRules) > 0 {
@@ -682,6 +744,40 @@ func (r *RuleS2SReconciler) generateRuleName(
 	return result
 }
 
+// getExistingIEAgAgRules returns all IEAgAgRules that have an OwnerReference to the given RuleS2S
+func (r *RuleS2SReconciler) getExistingIEAgAgRules(ctx context.Context, ruleS2S *netguardv1alpha1.RuleS2S) ([]providerv1alpha1.IEAgAgRule, error) {
+	logger := log.FromContext(ctx)
+
+	// Get all IEAgAgRules across all namespaces
+	ieAgAgRuleList := &providerv1alpha1.IEAgAgRuleList{}
+	if err := r.List(ctx, ieAgAgRuleList); err != nil {
+		logger.Error(err, "Failed to list IEAgAgRules")
+		return nil, err
+	}
+
+	var relatedRules []providerv1alpha1.IEAgAgRule
+
+	// Check each rule for an OwnerReference to this RuleS2S
+	for _, rule := range ieAgAgRuleList.Items {
+		for _, ownerRef := range rule.GetOwnerReferences() {
+			if ownerRef.UID == ruleS2S.GetUID() &&
+				ownerRef.Kind == "RuleS2S" &&
+				ownerRef.APIVersion == netguardv1alpha1.GroupVersion.String() {
+
+				// Found a rule that references this RuleS2S
+				relatedRules = append(relatedRules, rule)
+				break
+			}
+		}
+	}
+
+	logger.Info("Found existing IEAgAg rules",
+		"ruleS2S", ruleS2S.Name,
+		"count", len(relatedRules))
+
+	return relatedRules, nil
+}
+
 // deleteRelatedIEAgAgRules deletes all IEAgAgRules that have an OwnerReference to the given RuleS2S
 func (r *RuleS2SReconciler) deleteRelatedIEAgAgRules(ctx context.Context, ruleS2S *netguardv1alpha1.RuleS2S) error {
 	logger := log.FromContext(ctx)
@@ -836,31 +932,11 @@ func (r *RuleS2SReconciler) findRuleS2SForServiceAlias(ctx context.Context, obj 
 	return requests
 }
 
-// findRuleS2SForAddressGroupBinding finds all RuleS2S resources that may be affected by changes to an AddressGroupBinding
-func (r *RuleS2SReconciler) findRuleS2SForAddressGroupBinding(ctx context.Context, obj client.Object) []reconcile.Request {
-	binding, ok := obj.(*netguardv1alpha1.AddressGroupBinding)
-	if !ok {
-		return nil
-	}
-
-	logger := log.FromContext(ctx).WithValues("binding", binding.Name, "namespace", binding.Namespace)
-	logger.Info("Finding RuleS2S resources for AddressGroupBinding")
-
-	// Get the Service referenced by the binding
-	service := &netguardv1alpha1.Service{}
-	if err := r.Get(ctx, types.NamespacedName{
-		Name:      binding.Spec.ServiceRef.Name,
-		Namespace: binding.Namespace,
-	}, service); err != nil {
-		logger.Error(err, "Failed to get Service referenced by AddressGroupBinding")
-		return nil
-	}
-
-	// Use the findRuleS2SForService function to find affected RuleS2S resources
-	return r.findRuleS2SForService(ctx, service)
-}
-
 // SetupWithManager sets up the controller with the Manager.
+//  1. When an AddressGroupBinding is deleted, the AddressGroupBinding controller already updates the Service
+//     by removing the AddressGroup from Service.AddressGroups
+//  2. This controller is already watching for changes to Service resources, so it will be notified
+//     when a Service's AddressGroups are modified
 func (r *RuleS2SReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// Add indexes for faster lookups
 	if err := mgr.GetFieldIndexer().IndexField(context.Background(),
@@ -908,11 +984,6 @@ func (r *RuleS2SReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(
 			&netguardv1alpha1.ServiceAlias{},
 			handler.EnqueueRequestsFromMapFunc(r.findRuleS2SForServiceAlias),
-		).
-		// Watch for changes to AddressGroupBinding resources
-		Watches(
-			&netguardv1alpha1.AddressGroupBinding{},
-			handler.EnqueueRequestsFromMapFunc(r.findRuleS2SForAddressGroupBinding),
 		).
 		Named("rules2s").
 		Complete(r)
