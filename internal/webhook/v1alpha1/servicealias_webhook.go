@@ -19,6 +19,7 @@ package v1alpha1
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -129,26 +130,60 @@ func (v *ServiceAliasCustomValidator) ValidateDelete(ctx context.Context, obj ru
 		return nil, fmt.Errorf("failed to list RuleS2S objects: %w", err)
 	}
 
+	// Collect references by type
+	localServiceRefs := make(map[string]struct{})
+	targetServiceRefs := make(map[string]struct{})
+
 	// Check if any rules reference this ServiceAlias
 	for _, rule := range ruleS2SList.Items {
 		// Check if the rule references this ServiceAlias as local service
 		if rule.Spec.ServiceLocalRef.Name == serviceAlias.Name &&
 			rule.Namespace == serviceAlias.Namespace {
-			servicealiaslog.Info("Cannot delete ServiceAlias: it is referenced by RuleS2S as local service",
+			servicealiaslog.Info("ServiceAlias is referenced by RuleS2S as local service",
 				"serviceAlias", serviceAlias.Name, "rule", rule.Name)
-			return nil, fmt.Errorf("cannot delete ServiceAlias %s: it is referenced by RuleS2S %s as local service",
-				serviceAlias.Name, rule.Name)
+			localServiceRefs[rule.Name] = struct{}{}
 		}
 
 		// Check if the rule references this ServiceAlias as target service
 		targetNamespace := rule.Spec.ServiceRef.ResolveNamespace(rule.Namespace)
 		if rule.Spec.ServiceRef.Name == serviceAlias.Name &&
 			targetNamespace == serviceAlias.Namespace {
-			servicealiaslog.Info("Cannot delete ServiceAlias: it is referenced by RuleS2S as target service",
+			servicealiaslog.Info("ServiceAlias is referenced by RuleS2S as target service",
 				"serviceAlias", serviceAlias.Name, "rule", rule.Name)
-			return nil, fmt.Errorf("cannot delete ServiceAlias %s: it is referenced by RuleS2S %s as target service",
-				serviceAlias.Name, rule.Name)
+			targetServiceRefs[rule.Name] = struct{}{}
 		}
+	}
+
+	// If there are any references, return a detailed error message
+	if len(localServiceRefs) > 0 || len(targetServiceRefs) > 0 {
+		var errorMsg string
+
+		// Format local service references
+		if len(localServiceRefs) > 0 {
+			var localRules []string
+			for ruleName := range localServiceRefs {
+				localRules = append(localRules, ruleName)
+			}
+			errorMsg += fmt.Sprintf("Cannot delete ServiceAlias %s: it is referenced by RuleS2S as local service:\n%s",
+				serviceAlias.Name, strings.Join(localRules, "\n"))
+		}
+
+		// Format target service references
+		if len(targetServiceRefs) > 0 {
+			if errorMsg != "" {
+				errorMsg += "\n\n"
+			}
+			var targetRules []string
+			for ruleName := range targetServiceRefs {
+				targetRules = append(targetRules, ruleName)
+			}
+			errorMsg += fmt.Sprintf("Cannot delete ServiceAlias %s: it is referenced by RuleS2S as target service:\n%s",
+				serviceAlias.Name, strings.Join(targetRules, "\n"))
+		}
+
+		servicealiaslog.Info("Cannot delete ServiceAlias: it is referenced by RuleS2S",
+			"serviceAlias", serviceAlias.Name, "errorMsg", errorMsg)
+		return nil, fmt.Errorf(errorMsg)
 	}
 
 	return nil, nil
