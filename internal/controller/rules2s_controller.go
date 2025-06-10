@@ -369,6 +369,17 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			logger.Error(err, "Failed to delete some related IEAgAgRules")
 		}
 
+		// Удаляем финализатор перед удалением ресурса
+		if controllerutil.ContainsFinalizer(ruleS2S, "netguard.sgroups.io/finalizer") {
+			logger.Info("Removing finalizer from inactive RuleS2S", "name", ruleS2S.Name)
+			if err := RemoveFinalizer(ctx, r.Client, ruleS2S, "netguard.sgroups.io/finalizer"); err != nil {
+				if !errors.IsNotFound(err) {
+					logger.Error(err, "Failed to remove finalizer from RuleS2S")
+					return ctrl.Result{}, err
+				}
+			}
+		}
+
 		// Удаляем само правило RuleS2S
 		logger.Info("Auto-deleting inactive RuleS2S", "name", ruleS2S.Name, "namespace", ruleS2S.Namespace)
 		if err := SafeDeleteAndWait(ctx, r.Client, ruleS2S, 30*time.Second); err != nil {
