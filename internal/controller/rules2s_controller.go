@@ -334,7 +334,7 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 				serviceName, ruleS2S.Spec.Traffic))
 	}
 
-	// If there are any inactive conditions, set status and return
+	// If there are any inactive conditions, set status and delete related rules
 	if len(inactiveConditions) > 0 {
 		// Format the message without numbering and extra line breaks
 		var formattedMessage strings.Builder
@@ -358,10 +358,25 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		}
 
 		// Логируем информацию
-		logger.Info("Rule is valid but inactive",
+		logger.Info("Rule is valid but inactive, deleting related IEAgAgRules",
 			"conditions", strings.Join(inactiveConditions, "; "),
 			"localService", localService.Name,
 			"targetService", targetService.Name)
+
+		// Удаляем связанные IEAgAgRules
+		if err := r.deleteRelatedIEAgAgRules(ctx, ruleS2S); err != nil {
+			// Если не удалось удалить некоторые правила, логируем ошибку, но продолжаем
+			logger.Error(err, "Failed to delete some related IEAgAgRules")
+		}
+
+		// Удаляем само правило RuleS2S
+		logger.Info("Auto-deleting inactive RuleS2S", "name", ruleS2S.Name, "namespace", ruleS2S.Namespace)
+		if err := SafeDeleteAndWait(ctx, r.Client, ruleS2S, 30*time.Second); err != nil {
+			if !errors.IsNotFound(err) {
+				logger.Error(err, "Failed to auto-delete inactive RuleS2S", "name", ruleS2S.Name)
+				return ctrl.Result{}, err
+			}
+		}
 
 		// Возвращаем пустой Result без RequeueAfter
 		return ctrl.Result{}, nil
