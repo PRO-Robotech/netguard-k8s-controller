@@ -1,0 +1,19 @@
+apiVersion: netguard.sgroups.io/v1alpha1
+kind: AddressGroupBindingPolicy
+metadata:
+  labels:
+    app.kubernetes.io/name: sgroups-k8s-netguard
+    app.kubernetes.io/managed-by: kustomize
+  name: microservices-communication-policy
+  namespace: application
+spec:
+  addressGroupRef:
+    apiVersion: provider.sgroups.io/v1alpha1
+    kind: AddressGroup
+    name: microservice-a-pods
+    namespace: application
+  serviceRef:
+    apiVersion: netguard.sgroups.io/v1alpha1
+    kind: Service
+    name: microservice-b-service
+    namespace: application

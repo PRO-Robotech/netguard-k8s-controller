@@ -1,0 +1,59 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: manager-role
+rules:
+- apiGroups:
+  - netguard.sgroups.io
+  resources:
+  - addressgroupbindingpolicies
+  - addressgroupbindings
+  - addressgroupportmappings
+  - rules2s
+  - servicealiases
+  - services
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - netguard.sgroups.io
+  resources:
+  - addressgroupbindingpolicies/finalizers
+  - addressgroupbindings/finalizers
+  - addressgroupportmappings/finalizers
+  - rules2s/finalizers
+  - servicealiases/finalizers
+  - services/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - netguard.sgroups.io
+  resources:
+  - addressgroupbindingpolicies/status
+  - addressgroupbindings/status
+  - addressgroupportmappings/status
+  - rules2s/status
+  - servicealiases/status
+  - services/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - provider.sgroups.io
+  resources:
+  - ieagagrules
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch

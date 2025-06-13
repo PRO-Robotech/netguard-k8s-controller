@@ -1,0 +1,50 @@
+apiVersion: netguard.sgroups.io/v1alpha1
+kind: AddressGroupPortMapping
+metadata:
+  labels:
+    app.kubernetes.io/name: sgroups-k8s-netguard
+    app.kubernetes.io/managed-by: kustomize
+  name: database-access-mapping
+  namespace: default
+spec: {}
+accessPorts:
+  items:
+    - apiVersion: netguard.sgroups.io/v1alpha1
+      kind: Service
+      name: postgres-service
+      namespace: database
+      ports:
+        TCP:
+          - port: "5432"
+            description: "PostgreSQL standard port"
+    - apiVersion: netguard.sgroups.io/v1alpha1
+      kind: Service
+      name: mysql-service
+      namespace: database
+      ports:
+        TCP:
+          - port: "3306"
+            description: "MySQL standard port"
+    - apiVersion: netguard.sgroups.io/v1alpha1
+      kind: Service
+      name: redis-service
+      namespace: cache
+      ports:
+        TCP:
+          - port: "6379"
+            description: "Redis standard port"
+    - apiVersion: netguard.sgroups.io/v1alpha1
+      kind: Service
+      name: api-gateway
+      namespace: default
+      ports:
+        TCP:
+          - port: "8080-8090"
+            description: "API Gateway port range"
+          - port: "443"
+            description: "HTTPS traffic"
+        UDP:
+          - port: "53"
+            description: "DNS resolution"
+          - port: "10000-10100"
+            description: "High port range for UDP services"

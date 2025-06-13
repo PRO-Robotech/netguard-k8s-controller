@@ -1,0 +1,10 @@
+apiVersion: netguard.sgroups.io/v1alpha1
+kind: ServiceAlias
+metadata:
+  name: database-alias
+  namespace: default
+spec:
+  serviceRef:
+    apiVersion: netguard.sgroups.io/v1alpha1
+    kind: Service
+    name: database-service-example

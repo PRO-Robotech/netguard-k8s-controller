@@ -1,0 +1,9 @@
+apiVersion: netguard.sgroups.io/v1alpha1
+kind: RuleS2S
+metadata:
+  labels:
+    app.kubernetes.io/name: sgroups-k8s-netguard
+    app.kubernetes.io/managed-by: kustomize
+  name: rules2s-sample
+spec:
+  # TODO(user): Add fields here
