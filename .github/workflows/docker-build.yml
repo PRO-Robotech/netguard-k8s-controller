@@ -9,7 +9,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -46,6 +46,5 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
-#          tags: ${{ secrets.DOCKERHUB_USERNAME }}/sgroups.k8s.netguard:${{ github.head_ref || github.ref_name }}-${{ steps.short-sha.outputs.sha }}
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/sgroups.k8s.netguard:${{ steps.sanitize.outputs.branch }}-${{ steps.short-sha.outputs.sha }}
           platforms: linux/amd64,linux/arm64
