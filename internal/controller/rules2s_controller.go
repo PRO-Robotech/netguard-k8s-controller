@@ -889,6 +889,62 @@ func (r *RuleS2SReconciler) createOrUpdateIEAgAgRule(
 		"aggregatedPorts", strings.Join(aggregatedPorts, ","),
 		"contributingRulesCount", len(contributingRules))
 
+	// Check if aggregation resulted in empty ports - delete existing rule if so
+	if len(aggregatedPorts) == 0 {
+		logger.Info("No ports after aggregation, checking if rule exists to delete",
+			"ruleName", ruleName,
+			"protocol", protocol)
+
+		// If rule exists - delete it
+		existingRule := &providerv1alpha1.IEAgAgRule{}
+		err = r.Get(ctx, types.NamespacedName{
+			Namespace: ruleNamespace,
+			Name:      ruleName,
+		}, existingRule)
+
+		if err == nil {
+			// Rule exists, delete it
+			logger.Info("Deleting IEAgAgRule with no ports after aggregation",
+				"namespace", ruleNamespace,
+				"name", ruleName)
+
+			if err := r.Delete(ctx, existingRule); err != nil && !errors.IsNotFound(err) {
+				logger.Error(err, "Failed to delete rule with no ports")
+				r.logAggregationOperation(logger, "END_AGGREGATION", aggregationKey, map[string]interface{}{
+					"result": "DELETE_ERROR",
+					"error":  err,
+				})
+				return "", err
+			}
+
+			r.logAggregationOperation(logger, "END_AGGREGATION", aggregationKey, map[string]interface{}{
+				"result":   "DELETED_NO_PORTS",
+				"ruleName": ruleName,
+			})
+
+			return "", nil
+		} else if !errors.IsNotFound(err) {
+			// Error getting the rule
+			logger.Error(err, "Error checking if rule exists for deletion")
+			r.logAggregationOperation(logger, "END_AGGREGATION", aggregationKey, map[string]interface{}{
+				"result": "GET_ERROR",
+				"error":  err,
+			})
+			return "", err
+		}
+
+		// Rule doesn't exist, nothing to delete
+		logger.Info("No rule exists and no ports to create, skipping",
+			"ruleName", ruleName)
+
+		r.logAggregationOperation(logger, "END_AGGREGATION", aggregationKey, map[string]interface{}{
+			"result":   "SKIP_NO_PORTS",
+			"ruleName": ruleName,
+		})
+
+		return "", nil
+	}
+
 	existingRule := &providerv1alpha1.IEAgAgRule{}
 	err = r.Get(ctx, types.NamespacedName{
 		Namespace: ruleNamespace,
@@ -1200,6 +1256,14 @@ func (r *RuleS2SReconciler) createNewIEAgAgRuleWithAggregation(
 		"aggregatedPorts", strings.Join(aggregatedPorts, ","),
 		"contributingRules", len(contributingRules))
 
+	// Don't create rule with empty ports
+	if len(aggregatedPorts) == 0 {
+		logger.Info("Not creating rule with empty aggregated ports",
+			"namespace", ruleNamespace,
+			"name", ruleName)
+		return "", nil
+	}
+
 	ownerRefs := make([]metav1.OwnerReference, 0, len(contributingRules))
 	processedUIDs := make(map[types.UID]bool)
 
@@ -1311,6 +1375,24 @@ func (r *RuleS2SReconciler) updateExistingIEAgAgRuleWithAggregation(
 		"name", existingRule.Name,
 		"currentPorts", existingRule.Spec.Ports,
 		"newAggregatedPorts", strings.Join(aggregatedPorts, ","))
+
+	// If no ports after aggregation, delete the rule
+	if len(aggregatedPorts) == 0 {
+		logger.Info("Deleting existing IEAgAgRule with no ports after aggregation",
+			"namespace", existingRule.Namespace,
+			"name", existingRule.Name)
+
+		if err := r.Delete(ctx, existingRule); err != nil && !errors.IsNotFound(err) {
+			logger.Error(err, "Failed to delete rule with no ports")
+			return "", err
+		}
+
+		logger.Info("Successfully deleted rule with no aggregated ports",
+			"namespace", existingRule.Namespace,
+			"name", existingRule.Name)
+
+		return "", nil
+	}
 
 	latestRule := &providerv1alpha1.IEAgAgRule{}
 	if err := r.Get(ctx, types.NamespacedName{
@@ -1458,6 +1540,21 @@ func (r *RuleS2SReconciler) deleteRelatedIEAgAgRules(ctx context.Context, ruleS2
 		return err
 	}
 
+	// Get services for this RuleS2S to generate legacy rule names
+	localService, targetService, err := r.getServicesForRule(ctx, ruleS2S)
+	var expectedLegacyRuleNames map[string]bool
+	if err == nil {
+		expectedLegacyRuleNames = r.generateExpectedLegacyRuleNames(ruleS2S, localService, targetService)
+		logger.Info("Generated expected legacy rule names for search",
+			"ruleS2S", ruleS2S.Name,
+			"expectedLegacyRules", len(expectedLegacyRuleNames))
+	} else {
+		logger.Info("Could not get services for legacy rule name generation, will only search by owner reference",
+			"ruleS2S", ruleS2S.Name,
+			"error", err)
+		expectedLegacyRuleNames = make(map[string]bool)
+	}
+
 	var failedRules []string
 	processedRules := 0
 	updatedRules := 0
@@ -1465,7 +1562,9 @@ func (r *RuleS2SReconciler) deleteRelatedIEAgAgRules(ctx context.Context, ruleS2
 
 	for _, rule := range ieAgAgRuleList.Items {
 		hasOwnerRef := false
+		isLegacyRule := false
 
+		// Check if rule has owner reference to this RuleS2S (new aggregation rules)
 		for _, ownerRef := range rule.GetOwnerReferences() {
 			if ownerRef.UID == ruleS2S.GetUID() &&
 				ownerRef.Kind == "RuleS2S" &&
@@ -1475,12 +1574,68 @@ func (r *RuleS2SReconciler) deleteRelatedIEAgAgRules(ctx context.Context, ruleS2
 			}
 		}
 
-		if !hasOwnerRef {
+		// Check if rule name matches expected legacy rule names (old rules)
+		if !hasOwnerRef && len(expectedLegacyRuleNames) > 0 {
+			ruleKey := fmt.Sprintf("%s/%s", rule.Namespace, rule.Name)
+			if expectedLegacyRuleNames[ruleKey] {
+				isLegacyRule = true
+				logger.Info("Found legacy rule by name match",
+					"rule", rule.Name,
+					"namespace", rule.Namespace,
+					"ruleS2S", ruleS2S.Name)
+			}
+		}
+
+		// Additional search for orphaned legacy rules when services have no address groups
+		if !hasOwnerRef && !isLegacyRule && len(expectedLegacyRuleNames) == 0 {
+			// Check if this could be a legacy rule created by this RuleS2S
+			// by examining traffic direction and rule name pattern
+			if r.couldBeLegacyRuleForRuleS2S(&rule, ruleS2S) {
+				isLegacyRule = true
+				logger.Info("Found orphaned legacy rule by pattern match",
+					"rule", rule.Name,
+					"namespace", rule.Namespace,
+					"ruleS2S", ruleS2S.Name,
+					"traffic", rule.Spec.Traffic)
+			}
+		}
+
+		if !hasOwnerRef && !isLegacyRule {
 			continue
 		}
 
 		processedRules++
 
+		// For legacy rules (no owner ref), always delete them directly
+		if isLegacyRule && !hasOwnerRef {
+			logger.Info("Deleting legacy IEAgAgRule (no owner reference)",
+				"rule", rule.Name,
+				"namespace", rule.Namespace)
+
+			ruleCopy := rule.DeepCopy()
+			if controllerutil.ContainsFinalizer(ruleCopy, "provider.sgroups.io/finalizer") {
+				controllerutil.RemoveFinalizer(ruleCopy, "provider.sgroups.io/finalizer")
+				if err := UpdateWithRetry(ctx, r.Client, ruleCopy, DefaultMaxRetries); err != nil {
+					if !errors.IsNotFound(err) {
+						logger.Error(err, "Failed to remove finalizer from legacy rule")
+					}
+				}
+			}
+
+			if err := r.Delete(ctx, ruleCopy); err != nil {
+				if !errors.IsNotFound(err) {
+					logger.Error(err, "Failed to delete legacy rule")
+					failedRules = append(failedRules, fmt.Sprintf("%s/%s", ruleCopy.Namespace, ruleCopy.Name))
+				} else {
+					deletedRules++
+				}
+			} else {
+				deletedRules++
+			}
+			continue
+		}
+
+		// For rules with owner references (new aggregation rules)
 		if len(rule.GetOwnerReferences()) > 1 {
 			logger.Info("Updating IEAgAgRule - removing owner reference and recalculating ports",
 				"rule", rule.Name,
@@ -1536,6 +1691,85 @@ func (r *RuleS2SReconciler) deleteRelatedIEAgAgRules(ctx context.Context, ruleS2
 	return nil
 }
 
+// generateExpectedLegacyRuleNames generates expected rule names for legacy rules
+func (r *RuleS2SReconciler) generateExpectedLegacyRuleNames(
+	ruleS2S *netguardv1alpha1.RuleS2S,
+	localService *netguardv1alpha1.Service,
+	targetService *netguardv1alpha1.Service,
+) map[string]bool {
+	expectedRules := make(map[string]bool)
+
+	localAddressGroups := localService.AddressGroups.Items
+	targetAddressGroups := targetService.AddressGroups.Items
+
+	// Generate rule names for all combinations of address groups and protocols
+	for _, localAG := range localAddressGroups {
+		for _, targetAG := range targetAddressGroups {
+			// Generate TCP rule name
+			tcpRuleName := r.generateRuleName(
+				ruleS2S.Spec.Traffic,
+				localAG.Name,
+				targetAG.Name,
+				"tcp")
+
+			// Generate UDP rule name
+			udpRuleName := r.generateRuleName(
+				ruleS2S.Spec.Traffic,
+				localAG.Name,
+				targetAG.Name,
+				"udp")
+
+			// Determine namespace for the rule based on traffic direction
+			var ruleNamespace string
+			if ruleS2S.Spec.Traffic == "ingress" {
+				ruleNamespace = localAG.ResolveNamespace(ruleS2S.GetNamespace())
+			} else {
+				ruleNamespace = targetAG.ResolveNamespace(ruleS2S.GetNamespace())
+			}
+
+			// Add to expected rules map
+			tcpRuleKey := fmt.Sprintf("%s/%s", ruleNamespace, tcpRuleName)
+			udpRuleKey := fmt.Sprintf("%s/%s", ruleNamespace, udpRuleName)
+
+			expectedRules[tcpRuleKey] = true
+			expectedRules[udpRuleKey] = true
+		}
+	}
+
+	return expectedRules
+}
+
+// couldBeLegacyRuleForRuleS2S checks if an IEAgAgRule could be a legacy rule created by the given RuleS2S
+func (r *RuleS2SReconciler) couldBeLegacyRuleForRuleS2S(
+	rule *providerv1alpha1.IEAgAgRule,
+	ruleS2S *netguardv1alpha1.RuleS2S,
+) bool {
+	// Check traffic direction matches
+	if strings.ToLower(string(rule.Spec.Traffic)) != strings.ToLower(ruleS2S.Spec.Traffic) {
+		return false
+	}
+
+	// Check rule name pattern - legacy rules have prefixes based on traffic direction
+	var expectedPrefix string
+	if strings.ToLower(ruleS2S.Spec.Traffic) == "ingress" {
+		expectedPrefix = "ing-"
+	} else {
+		expectedPrefix = "egr-"
+	}
+
+	if !strings.HasPrefix(rule.Name, expectedPrefix) {
+		return false
+	}
+
+	// Check if rule has empty ports (the main indicator of the problem we're fixing)
+	if len(rule.Spec.Ports) > 0 && rule.Spec.Ports[0].D == "" {
+		// This is likely an orphaned rule with empty ports that should be deleted
+		return true
+	}
+
+	return false
+}
+
 // updateRuleRemoveOwnerAndRecalculatePorts updates a rule after removing one of its owners
 func (r *RuleS2SReconciler) updateRuleRemoveOwnerAndRecalculatePorts(
 	ctx context.Context,
@@ -1575,6 +1809,24 @@ func (r *RuleS2SReconciler) updateRuleRemoveOwnerAndRecalculatePorts(
 	if err != nil {
 		logger.Error(err, "Failed to recalculate ports")
 	} else {
+		// If no ports remain after recalculation, delete the rule instead of updating
+		if len(aggregatedPorts) == 0 {
+			logger.Info("No ports remaining after recalculation, deleting rule",
+				"rule", latestRule.Name,
+				"namespace", latestRule.Namespace)
+
+			if err := r.Delete(ctx, latestRule); err != nil && !errors.IsNotFound(err) {
+				logger.Error(err, "Failed to delete rule with no remaining ports")
+				return err
+			}
+
+			logger.Info("Successfully deleted rule with no remaining ports",
+				"rule", latestRule.Name,
+				"namespace", latestRule.Namespace)
+
+			return nil
+		}
+
 		latestRule.Spec.Ports = []providerv1alpha1.AccPorts{
 			{
 				D: strings.Join(aggregatedPorts, ","),
