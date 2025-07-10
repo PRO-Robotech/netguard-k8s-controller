@@ -20,15 +20,18 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -44,6 +47,52 @@ import (
 type RuleS2SReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+}
+
+// EnablePortAggregation controls whether port aggregation is enabled for multiple RuleS2S
+const EnablePortAggregation = true
+
+// aggregationMutexes contains mutexes for synchronizing aggregation operations
+var aggregationMutexes = sync.Map{}
+
+// getAggregationMutex returns a mutex for a specific aggregation key
+func getAggregationMutex(key RuleAggregationKey) *sync.Mutex {
+	mutexKey := fmt.Sprintf("%s-%s-%s-%s",
+		key.Traffic, key.LocalAGName, key.TargetAGName, key.Protocol)
+
+	mutex, _ := aggregationMutexes.LoadOrStore(mutexKey, &sync.Mutex{})
+	return mutex.(*sync.Mutex)
+}
+
+// logAggregationOperation logs aggregation operations for debugging
+func (r *RuleS2SReconciler) logAggregationOperation(logger logr.Logger, operation string, key RuleAggregationKey, details map[string]interface{}) {
+	baseFields := []interface{}{
+		"operation", operation,
+		"traffic", key.Traffic,
+		"localAG", key.LocalAGName,
+		"targetAG", key.TargetAGName,
+		"protocol", key.Protocol,
+	}
+
+	for k, v := range details {
+		baseFields = append(baseFields, k, v)
+	}
+
+	logger.Info("AGGREGATION_OPERATION", baseFields...)
+}
+
+// ContributingRule represents a RuleS2S that contributes to an IEAgAgRule
+type ContributingRule struct {
+	RuleS2S *netguardv1alpha1.RuleS2S
+	Ports   []string
+}
+
+// RuleAggregationKey uniquely identifies an aggregated rule
+type RuleAggregationKey struct {
+	Traffic      string
+	LocalAGName  string
+	TargetAGName string
+	Protocol     string
 }
 
 // +kubebuilder:rbac:groups=netguard.sgroups.io,resources=rules2s,verbs=get;list;watch;create;update;patch;delete
@@ -148,10 +197,7 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			logger.Error(err, "Failed to update RuleS2S status")
 		}
 
-		// Логируем информацию
 		logger.Info(errorMsg, "name", ruleS2S.Spec.ServiceLocalRef.Name)
-
-		// Возвращаем пустой Result без RequeueAfter
 		return ctrl.Result{}, nil
 	}
 
@@ -164,7 +210,6 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		errorMsg := fmt.Sprintf("Target service alias '%s' not found in namespace '%s': %v",
 			ruleS2S.Spec.ServiceRef.Name, targetNamespace, err)
 
-		// Update status with error condition
 		meta.SetStatusCondition(&ruleS2S.Status.Conditions, metav1.Condition{
 			Type:    netguardv1alpha1.ConditionReady,
 			Status:  metav1.ConditionFalse,
@@ -175,10 +220,7 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			logger.Error(err, "Failed to update RuleS2S status")
 		}
 
-		// Логируем информацию
 		logger.Info(errorMsg, "name", ruleS2S.Spec.ServiceRef.Name, "namespace", targetNamespace)
-
-		// Возвращаем пустой Result без RequeueAfter
 		return ctrl.Result{}, nil
 	}
 
@@ -203,10 +245,7 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			logger.Error(err, "Failed to update RuleS2S status")
 		}
 
-		// Логируем информацию
 		logger.Info(errorMsg, "name", localServiceAlias.Spec.ServiceRef.Name, "namespace", localServiceNamespace)
-
-		// Возвращаем пустой Result без RequeueAfter
 		return ctrl.Result{}, nil
 	}
 
@@ -230,16 +269,12 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			logger.Error(err, "Failed to update RuleS2S status")
 		}
 
-		// Логируем информацию
 		logger.Info(errorMsg, "name", targetServiceAlias.Spec.ServiceRef.Name, "namespace", targetServiceNamespace)
-
-		// Возвращаем пустой Result без RequeueAfter
 		return ctrl.Result{}, nil
 	}
 
 	// Update RuleS2SDstOwnRef for cross-namespace references
 	if ruleS2S.Namespace != targetServiceNamespace {
-		// Add this rule to the target service's RuleS2SDstOwnRef
 		found := false
 		for _, ref := range targetService.RuleS2SDstOwnRef.Items {
 			if ref.Name == ruleS2S.Name && ref.Namespace == ruleS2S.Namespace {
@@ -263,7 +298,6 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 				errorMsg := fmt.Sprintf("Failed to update target service '%s' RuleS2SDstOwnRef: %v", targetService.Name, err)
 				logger.Error(err, errorMsg)
 
-				// Проверяем, нужна ли периодическая проверка для этого правила
 				if val, ok := ruleS2S.Annotations["netguard.sgroups.io/periodic-reconcile"]; ok && val == "true" {
 					return ctrl.Result{RequeueAfter: time.Minute}, err
 				}
@@ -272,7 +306,6 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			}
 		}
 	} else {
-		// For rules in the same namespace, use owner references
 		if err := controllerutil.SetControllerReference(targetService, ruleS2S, r.Scheme); err != nil {
 			errorMsg := fmt.Sprintf("Failed to set owner reference from target service '%s' to RuleS2S '%s': %v",
 				targetService.Name, ruleS2S.Name, err)
@@ -357,19 +390,15 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			logger.Error(err, "Failed to update RuleS2S status")
 		}
 
-		// Логируем информацию
 		logger.Info("Rule is valid but inactive, deleting related IEAgAgRules",
 			"conditions", strings.Join(inactiveConditions, "; "),
 			"localService", localService.Name,
 			"targetService", targetService.Name)
 
-		// Удаляем связанные IEAgAgRules
 		if err := r.deleteRelatedIEAgAgRules(ctx, ruleS2S); err != nil {
-			// Если не удалось удалить некоторые правила, логируем ошибку, но продолжаем
 			logger.Error(err, "Failed to delete some related IEAgAgRules")
 		}
 
-		// Возвращаем пустой Result без RequeueAfter
 		return ctrl.Result{}, nil
 	}
 
@@ -557,7 +586,6 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			logger.Error(err, "Failed to update RuleS2S status")
 		}
 
-		// Логируем информацию
 		logger.Info(errorMsg,
 			"localService", localService.Name,
 			"targetService", targetService.Name,
@@ -565,11 +593,218 @@ func (r *RuleS2SReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			"targetAddressGroups", len(targetAddressGroups),
 			"ports", len(ports))
 
-		// Возвращаем пустой Result без RequeueAfter
 		return ctrl.Result{}, nil
 	}
 
 	return ctrl.Result{}, nil
+}
+
+// findContributingRuleS2S finds all RuleS2S that should contribute to one IEAgAgRule
+func (r *RuleS2SReconciler) findContributingRuleS2S(
+	ctx context.Context,
+	currentRule *netguardv1alpha1.RuleS2S,
+	localService *netguardv1alpha1.Service,
+	targetService *netguardv1alpha1.Service,
+) ([]ContributingRule, error) {
+	logger := log.FromContext(ctx)
+
+	logger.Info("Finding contributing RuleS2S",
+		"currentRule", currentRule.Name,
+		"localService", localService.Name,
+		"targetService", targetService.Name)
+
+	allRules := &netguardv1alpha1.RuleS2SList{}
+	if err := r.List(ctx, allRules); err != nil {
+		logger.Error(err, "Failed to list RuleS2S")
+		return nil, err
+	}
+
+	var contributingRules []ContributingRule
+
+	for _, rule := range allRules.Items {
+		if !rule.DeletionTimestamp.IsZero() {
+			logger.V(2).Info("Skipping rule being deleted", "rule", rule.Name)
+			continue
+		}
+
+		contributes, ports, err := r.checkIfRuleContributes(ctx, &rule, currentRule, localService, targetService)
+		if err != nil {
+			logger.Error(err, "Error checking rule contribution", "rule", rule.Name)
+			continue
+		}
+
+		if contributes && len(ports) > 0 {
+			logger.Info("Found contributing rule",
+				"rule", rule.Name,
+				"namespace", rule.Namespace,
+				"ports", strings.Join(ports, ","))
+
+			contributingRules = append(contributingRules, ContributingRule{
+				RuleS2S: &rule,
+				Ports:   ports,
+			})
+		}
+	}
+
+	logger.Info("Found contributing rules",
+		"count", len(contributingRules),
+		"currentRule", currentRule.Name)
+
+	return contributingRules, nil
+}
+
+// checkIfRuleContributes checks if a rule should contribute to aggregation
+func (r *RuleS2SReconciler) checkIfRuleContributes(
+	ctx context.Context,
+	candidateRule *netguardv1alpha1.RuleS2S,
+	currentRule *netguardv1alpha1.RuleS2S,
+	localService *netguardv1alpha1.Service,
+	targetService *netguardv1alpha1.Service,
+) (bool, []string, error) {
+	logger := log.FromContext(ctx)
+
+	if candidateRule.Spec.Traffic != currentRule.Spec.Traffic {
+		return false, nil, nil
+	}
+
+	candidateLocalService, candidateTargetService, err := r.getServicesForRule(ctx, candidateRule)
+	if err != nil {
+		return false, nil, err
+	}
+
+	if !r.servicesHaveSameAddressGroups(localService, candidateLocalService) ||
+		!r.servicesHaveSameAddressGroups(targetService, candidateTargetService) {
+		return false, nil, nil
+	}
+
+	var ports []string
+	if strings.ToLower(candidateRule.Spec.Traffic) == "ingress" {
+		ports = r.extractPortsFromService(candidateLocalService)
+	} else {
+		ports = r.extractPortsFromService(candidateTargetService)
+	}
+
+	logger.V(2).Info("Rule contribution check",
+		"candidateRule", candidateRule.Name,
+		"contributes", true,
+		"ports", strings.Join(ports, ","))
+
+	return true, ports, nil
+}
+
+// getServicesForRule gets services for RuleS2S (extracting existing logic)
+func (r *RuleS2SReconciler) getServicesForRule(
+	ctx context.Context,
+	rule *netguardv1alpha1.RuleS2S,
+) (*netguardv1alpha1.Service, *netguardv1alpha1.Service, error) {
+	logger := log.FromContext(ctx)
+
+	localServiceAlias := &netguardv1alpha1.ServiceAlias{}
+	if err := r.Get(ctx, types.NamespacedName{
+		Namespace: rule.Namespace,
+		Name:      rule.Spec.ServiceLocalRef.Name,
+	}, localServiceAlias); err != nil {
+		logger.Error(err, "Local service alias not found",
+			"name", rule.Spec.ServiceLocalRef.Name,
+			"namespace", rule.Namespace)
+		return nil, nil, err
+	}
+
+	targetServiceAlias := &netguardv1alpha1.ServiceAlias{}
+	targetNamespace := rule.Spec.ServiceRef.ResolveNamespace(rule.Namespace)
+	if err := r.Get(ctx, types.NamespacedName{
+		Namespace: targetNamespace,
+		Name:      rule.Spec.ServiceRef.Name,
+	}, targetServiceAlias); err != nil {
+		logger.Error(err, "Target service alias not found",
+			"name", rule.Spec.ServiceRef.Name,
+			"namespace", targetNamespace)
+		return nil, nil, err
+	}
+
+	localService := &netguardv1alpha1.Service{}
+	localServiceNamespace := localServiceAlias.Spec.ServiceRef.ResolveNamespace(localServiceAlias.Namespace)
+	if err := r.Get(ctx, types.NamespacedName{
+		Namespace: localServiceNamespace,
+		Name:      localServiceAlias.Spec.ServiceRef.Name,
+	}, localService); err != nil {
+		logger.Error(err, "Local service not found",
+			"name", localServiceAlias.Spec.ServiceRef.Name,
+			"namespace", localServiceNamespace)
+		return nil, nil, err
+	}
+
+	targetService := &netguardv1alpha1.Service{}
+	targetServiceNamespace := targetServiceAlias.Spec.ServiceRef.ResolveNamespace(targetServiceAlias.Namespace)
+	if err := r.Get(ctx, types.NamespacedName{
+		Namespace: targetServiceNamespace,
+		Name:      targetServiceAlias.Spec.ServiceRef.Name,
+	}, targetService); err != nil {
+		logger.Error(err, "Target service not found",
+			"name", targetServiceAlias.Spec.ServiceRef.Name,
+			"namespace", targetServiceNamespace)
+		return nil, nil, err
+	}
+
+	return localService, targetService, nil
+}
+
+// servicesHaveSameAddressGroups checks if services have the same address groups
+func (r *RuleS2SReconciler) servicesHaveSameAddressGroups(
+	service1 *netguardv1alpha1.Service,
+	service2 *netguardv1alpha1.Service,
+) bool {
+	if len(service1.AddressGroups.Items) != len(service2.AddressGroups.Items) {
+		return false
+	}
+
+	agMap := make(map[string]bool)
+	for _, ag := range service1.AddressGroups.Items {
+		key := fmt.Sprintf("%s/%s", ag.GetNamespace(), ag.Name)
+		agMap[key] = true
+	}
+
+	for _, ag := range service2.AddressGroups.Items {
+		key := fmt.Sprintf("%s/%s", ag.GetNamespace(), ag.Name)
+		if !agMap[key] {
+			return false
+		}
+	}
+
+	return true
+}
+
+// extractPortsFromService extracts ports from the service
+func (r *RuleS2SReconciler) extractPortsFromService(
+	service *netguardv1alpha1.Service,
+) []string {
+	var ports []string
+	for _, port := range service.Spec.IngressPorts {
+		ports = append(ports, port.Port)
+	}
+	return ports
+}
+
+// aggregatePortsWithProtocol aggregates ports for a specific protocol
+func (r *RuleS2SReconciler) aggregatePortsWithProtocol(
+	contributingRules []ContributingRule,
+	protocol netguardv1alpha1.TransportProtocol,
+) []string {
+	portSet := make(map[string]bool)
+
+	for _, rule := range contributingRules {
+		for _, port := range rule.Ports {
+			portSet[port] = true
+		}
+	}
+
+	var aggregatedPorts []string
+	for port := range portSet {
+		aggregatedPorts = append(aggregatedPorts, port)
+	}
+
+	sort.Strings(aggregatedPorts)
+	return aggregatedPorts
 }
 
 // createOrUpdateIEAgAgRule creates or updates an IEAgAgRule
@@ -583,8 +818,126 @@ func (r *RuleS2SReconciler) createOrUpdateIEAgAgRule(
 ) (string, error) {
 	logger := log.FromContext(ctx)
 
-	// Логирование входных параметров
-	logger.Info("Starting createOrUpdateIEAgAgRule",
+	if !EnablePortAggregation {
+		return r.createOrUpdateIEAgAgRuleLegacy(ctx, ruleS2S, localAG, targetAG, protocol, portsStr)
+	}
+
+	aggregationKey := RuleAggregationKey{
+		Traffic:      ruleS2S.Spec.Traffic,
+		LocalAGName:  localAG.Name,
+		TargetAGName: targetAG.Name,
+		Protocol:     string(protocol),
+	}
+
+	mutex := getAggregationMutex(aggregationKey)
+	mutex.Lock()
+	defer mutex.Unlock()
+
+	logger.Info("Starting createOrUpdateIEAgAgRule with aggregation (SYNCHRONIZED)",
+		"ruleS2S", ruleS2S.Name,
+		"ruleS2S.UID", ruleS2S.GetUID(),
+		"localAG", localAG.Name,
+		"localAG.Namespace", localAG.GetNamespace(),
+		"targetAG", targetAG.Name,
+		"targetAG.Namespace", targetAG.GetNamespace(),
+		"protocol", protocol,
+		"ports", portsStr,
+		"aggregationKey", fmt.Sprintf("%s-%s-%s-%s",
+			aggregationKey.Traffic, aggregationKey.LocalAGName,
+			aggregationKey.TargetAGName, aggregationKey.Protocol))
+
+	r.logAggregationOperation(logger, "START_AGGREGATION", aggregationKey, map[string]interface{}{
+		"ruleS2S": ruleS2S.Name,
+		"ruleUID": ruleS2S.GetUID(),
+		"ports":   portsStr,
+	})
+
+	var ruleNamespace string
+	if ruleS2S.Spec.Traffic == "ingress" {
+		ruleNamespace = localAG.ResolveNamespace(ruleS2S.GetNamespace())
+	} else {
+		ruleNamespace = targetAG.ResolveNamespace(ruleS2S.GetNamespace())
+	}
+
+	if ruleNamespace == "" {
+		logger.Error(fmt.Errorf("empty namespace"), "Cannot create rule with empty namespace")
+		return "", fmt.Errorf("cannot create rule with empty namespace")
+	}
+
+	ruleName := r.generateRuleName(
+		ruleS2S.Spec.Traffic,
+		localAG.Name,
+		targetAG.Name,
+		string(protocol))
+
+	localService, targetService, err := r.getServicesForRule(ctx, ruleS2S)
+	if err != nil {
+		logger.Error(err, "Failed to get services for rule, falling back to legacy")
+		return r.createOrUpdateIEAgAgRuleLegacy(ctx, ruleS2S, localAG, targetAG, protocol, portsStr)
+	}
+
+	contributingRules, err := r.findContributingRuleS2S(ctx, ruleS2S, localService, targetService)
+	if err != nil {
+		logger.Error(err, "Failed to find contributing rules, falling back to legacy")
+		return r.createOrUpdateIEAgAgRuleLegacy(ctx, ruleS2S, localAG, targetAG, protocol, portsStr)
+	}
+
+	aggregatedPorts := r.aggregatePortsWithProtocol(contributingRules, protocol)
+	logger.Info("Aggregated ports for rule",
+		"ruleName", ruleName,
+		"protocol", protocol,
+		"aggregatedPorts", strings.Join(aggregatedPorts, ","),
+		"contributingRulesCount", len(contributingRules))
+
+	existingRule := &providerv1alpha1.IEAgAgRule{}
+	err = r.Get(ctx, types.NamespacedName{
+		Namespace: ruleNamespace,
+		Name:      ruleName,
+	}, existingRule)
+
+	if err != nil && errors.IsNotFound(err) {
+		result, err := r.createNewIEAgAgRuleWithAggregation(ctx, ruleNamespace, ruleName,
+			ruleS2S, localAG, targetAG, protocol, aggregatedPorts, contributingRules)
+
+		r.logAggregationOperation(logger, "END_AGGREGATION", aggregationKey, map[string]interface{}{
+			"result":   "CREATE",
+			"ruleName": result,
+			"error":    err,
+		})
+
+		return result, err
+	} else if err != nil {
+		r.logAggregationOperation(logger, "END_AGGREGATION", aggregationKey, map[string]interface{}{
+			"result": "ERROR",
+			"error":  err,
+		})
+		return "", err
+	}
+
+	result, err := r.updateExistingIEAgAgRuleWithAggregation(ctx, existingRule,
+		aggregatedPorts, contributingRules)
+
+	r.logAggregationOperation(logger, "END_AGGREGATION", aggregationKey, map[string]interface{}{
+		"result":   "UPDATE",
+		"ruleName": result,
+		"error":    err,
+	})
+
+	return result, err
+}
+
+// createOrUpdateIEAgAgRuleLegacy creates or updates an IEAgAgRule (legacy logic)
+func (r *RuleS2SReconciler) createOrUpdateIEAgAgRuleLegacy(
+	ctx context.Context,
+	ruleS2S *netguardv1alpha1.RuleS2S,
+	localAG netguardv1alpha1.NamespacedObjectReference,
+	targetAG netguardv1alpha1.NamespacedObjectReference,
+	protocol netguardv1alpha1.TransportProtocol,
+	portsStr string,
+) (string, error) {
+	logger := log.FromContext(ctx)
+
+	logger.Info("Starting createOrUpdateIEAgAgRuleLegacy",
 		"ruleS2S", ruleS2S.Name,
 		"ruleS2S.UID", ruleS2S.GetUID(),
 		"localAG", localAG.Name,
@@ -594,17 +947,14 @@ func (r *RuleS2SReconciler) createOrUpdateIEAgAgRule(
 		"protocol", protocol,
 		"ports", portsStr)
 
-	// Determine namespace for the rule based on traffic direction
 	var ruleNamespace string
 	if ruleS2S.Spec.Traffic == "ingress" {
-		// For ingress, rule goes in the local AG namespace (receiver)
 		ruleNamespace = localAG.ResolveNamespace(ruleS2S.GetNamespace())
 		logger.Info("Using ingress namespace logic",
 			"ruleNamespace", ruleNamespace,
 			"localAG.Namespace", localAG.GetNamespace(),
 			"ruleS2S.Namespace", ruleS2S.GetNamespace())
 	} else {
-		// For egress, rule goes in the target AG namespace (receiver)
 		ruleNamespace = targetAG.ResolveNamespace(ruleS2S.GetNamespace())
 		logger.Info("Using egress namespace logic",
 			"ruleNamespace", ruleNamespace,
@@ -612,13 +962,11 @@ func (r *RuleS2SReconciler) createOrUpdateIEAgAgRule(
 			"ruleS2S.Namespace", ruleS2S.GetNamespace())
 	}
 
-	// Ensure namespace is not empty
 	if ruleNamespace == "" {
 		logger.Error(fmt.Errorf("empty namespace"), "Cannot create rule with empty namespace")
 		return "", fmt.Errorf("cannot create rule with empty namespace")
 	}
 
-	// Generate rule name using the helper function
 	ruleName := r.generateRuleName(
 		ruleS2S.Spec.Traffic,
 		localAG.Name,
@@ -633,7 +981,6 @@ func (r *RuleS2SReconciler) createOrUpdateIEAgAgRule(
 			targetAG.Name,
 			strings.ToLower(string(protocol))))
 
-	// Define the rule spec
 	ruleSpec := providerv1alpha1.IEAgAgRuleSpec{
 		Transport: providerv1alpha1.TransportProtocol(string(protocol)),
 		Traffic:   providerv1alpha1.TrafficDirection(strings.ToUpper(ruleS2S.Spec.Traffic)),
@@ -665,7 +1012,6 @@ func (r *RuleS2SReconciler) createOrUpdateIEAgAgRule(
 		},
 	}
 
-	// Check if the rule already exists
 	existingRule := &providerv1alpha1.IEAgAgRule{}
 	err := r.Get(ctx, types.NamespacedName{
 		Namespace: ruleNamespace,
@@ -678,10 +1024,8 @@ func (r *RuleS2SReconciler) createOrUpdateIEAgAgRule(
 			"name", ruleName,
 			"error", err.Error())
 
-		// Rule doesn't exist, create it with retry
 		logger.Info("Creating new IEAgAgRule", "namespace", ruleNamespace, "name", ruleName)
 
-		// Create the rule
 		newRule := &providerv1alpha1.IEAgAgRule{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      ruleName,
@@ -692,8 +1036,8 @@ func (r *RuleS2SReconciler) createOrUpdateIEAgAgRule(
 						Kind:               "RuleS2S",
 						Name:               ruleS2S.GetName(),
 						UID:                ruleS2S.GetUID(),
-						Controller:         pointer.Bool(false),
-						BlockOwnerDeletion: pointer.Bool(true),
+						Controller:         ptr.To(false),
+						BlockOwnerDeletion: ptr.To(true),
 					},
 				},
 			},
@@ -779,7 +1123,6 @@ func (r *RuleS2SReconciler) createOrUpdateIEAgAgRule(
 		// Error getting the rule
 		return "", err
 	} else {
-		// Правило существует
 		logger.Info("Rule exists, will update",
 			"namespace", ruleNamespace,
 			"name", ruleName,
@@ -814,7 +1157,6 @@ func (r *RuleS2SReconciler) createOrUpdateIEAgAgRule(
 	// Update the spec
 	latestRule.Spec = ruleSpec
 
-	// Логирование перед патчем
 	logger.Info("Applying patch to rule",
 		"namespace", ruleNamespace,
 		"name", ruleName,
@@ -838,6 +1180,197 @@ func (r *RuleS2SReconciler) createOrUpdateIEAgAgRule(
 	return ruleName, nil
 }
 
+// createNewIEAgAgRuleWithAggregation создает новое правило с учетом всех contributing rules
+func (r *RuleS2SReconciler) createNewIEAgAgRuleWithAggregation(
+	ctx context.Context,
+	ruleNamespace string,
+	ruleName string,
+	currentRuleS2S *netguardv1alpha1.RuleS2S,
+	localAG netguardv1alpha1.NamespacedObjectReference,
+	targetAG netguardv1alpha1.NamespacedObjectReference,
+	protocol netguardv1alpha1.TransportProtocol,
+	aggregatedPorts []string,
+	contributingRules []ContributingRule,
+) (string, error) {
+	logger := log.FromContext(ctx)
+
+	logger.Info("Creating new IEAgAgRule with aggregation",
+		"namespace", ruleNamespace,
+		"name", ruleName,
+		"aggregatedPorts", strings.Join(aggregatedPorts, ","),
+		"contributingRules", len(contributingRules))
+
+	ownerRefs := make([]metav1.OwnerReference, 0, len(contributingRules))
+	processedUIDs := make(map[types.UID]bool)
+
+	for _, contrib := range contributingRules {
+		if !processedUIDs[contrib.RuleS2S.UID] {
+			ownerRefs = append(ownerRefs, metav1.OwnerReference{
+				APIVersion:         netguardv1alpha1.GroupVersion.String(),
+				Kind:               "RuleS2S",
+				Name:               contrib.RuleS2S.Name,
+				UID:                contrib.RuleS2S.UID,
+				Controller:         ptr.To(false),
+				BlockOwnerDeletion: ptr.To(true),
+			})
+			processedUIDs[contrib.RuleS2S.UID] = true
+
+			logger.Info("Adding owner reference",
+				"ruleS2S", contrib.RuleS2S.Name,
+				"uid", contrib.RuleS2S.UID)
+		}
+	}
+
+	ruleSpec := providerv1alpha1.IEAgAgRuleSpec{
+		Transport: providerv1alpha1.TransportProtocol(string(protocol)),
+		Traffic:   providerv1alpha1.TrafficDirection(strings.ToUpper(currentRuleS2S.Spec.Traffic)),
+		AddressGroupLocal: providerv1alpha1.NamespacedObjectReference{
+			ObjectReference: providerv1alpha1.ObjectReference{
+				APIVersion: localAG.APIVersion,
+				Kind:       localAG.Kind,
+				Name:       localAG.Name,
+			},
+			Namespace: localAG.ResolveNamespace(localAG.GetNamespace()),
+		},
+		AddressGroup: providerv1alpha1.NamespacedObjectReference{
+			ObjectReference: providerv1alpha1.ObjectReference{
+				APIVersion: targetAG.APIVersion,
+				Kind:       targetAG.Kind,
+				Name:       targetAG.Name,
+			},
+			Namespace: targetAG.ResolveNamespace(targetAG.GetNamespace()),
+		},
+		Ports: []providerv1alpha1.AccPorts{
+			{
+				D: strings.Join(aggregatedPorts, ","),
+			},
+		},
+		Action: providerv1alpha1.ActionAccept,
+		Logs:   true,
+		Priority: &providerv1alpha1.RulePrioritySpec{
+			Value: 100,
+		},
+	}
+
+	newRule := &providerv1alpha1.IEAgAgRule{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            ruleName,
+			Namespace:       ruleNamespace,
+			OwnerReferences: ownerRefs,
+		},
+		Spec: ruleSpec,
+	}
+
+	for i := 0; i < DefaultMaxRetries; i++ {
+		if err := r.Create(ctx, newRule); err != nil {
+			if errors.IsAlreadyExists(err) {
+				logger.Info("Rule already exists, switching to update",
+					"namespace", ruleNamespace,
+					"name", ruleName)
+
+				existingRule := &providerv1alpha1.IEAgAgRule{}
+				if err := r.Get(ctx, types.NamespacedName{
+					Namespace: ruleNamespace,
+					Name:      ruleName,
+				}, existingRule); err == nil {
+					return r.updateExistingIEAgAgRuleWithAggregation(ctx, existingRule,
+						aggregatedPorts, contributingRules)
+				}
+			} else if errors.IsConflict(err) {
+				logger.Info("Conflict detected, retrying",
+					"attempt", i+1,
+					"maxRetries", DefaultMaxRetries)
+				time.Sleep(DefaultRetryInterval)
+				continue
+			} else {
+				logger.Error(err, "Failed to create rule")
+				return "", err
+			}
+		} else {
+			logger.Info("Successfully created aggregated rule",
+				"namespace", ruleNamespace,
+				"name", ruleName)
+			return ruleName, nil
+		}
+	}
+
+	return "", fmt.Errorf("failed to create rule after %d retries", DefaultMaxRetries)
+}
+
+// updateExistingIEAgAgRuleWithAggregation обновляет существующее правило с агрегацией
+func (r *RuleS2SReconciler) updateExistingIEAgAgRuleWithAggregation(
+	ctx context.Context,
+	existingRule *providerv1alpha1.IEAgAgRule,
+	aggregatedPorts []string,
+	contributingRules []ContributingRule,
+) (string, error) {
+	logger := log.FromContext(ctx)
+
+	logger.Info("Updating existing IEAgAgRule with aggregation",
+		"namespace", existingRule.Namespace,
+		"name", existingRule.Name,
+		"currentPorts", existingRule.Spec.Ports,
+		"newAggregatedPorts", strings.Join(aggregatedPorts, ","))
+
+	latestRule := &providerv1alpha1.IEAgAgRule{}
+	if err := r.Get(ctx, types.NamespacedName{
+		Namespace: existingRule.Namespace,
+		Name:      existingRule.Name,
+	}, latestRule); err != nil {
+		logger.Error(err, "Failed to get latest version of rule")
+		return "", err
+	}
+
+	original := latestRule.DeepCopy()
+
+	latestRule.Spec.Ports = []providerv1alpha1.AccPorts{
+		{
+			D: strings.Join(aggregatedPorts, ","),
+		},
+	}
+
+	existingUIDs := make(map[types.UID]bool)
+	for _, ref := range latestRule.OwnerReferences {
+		existingUIDs[ref.UID] = true
+	}
+
+	addedCount := 0
+	for _, contrib := range contributingRules {
+		if !existingUIDs[contrib.RuleS2S.UID] {
+			latestRule.OwnerReferences = append(latestRule.OwnerReferences, metav1.OwnerReference{
+				APIVersion:         netguardv1alpha1.GroupVersion.String(),
+				Kind:               "RuleS2S",
+				Name:               contrib.RuleS2S.Name,
+				UID:                contrib.RuleS2S.UID,
+				Controller:         ptr.To(false),
+				BlockOwnerDeletion: ptr.To(true),
+			})
+			addedCount++
+
+			logger.Info("Adding new owner reference",
+				"ruleS2S", contrib.RuleS2S.Name,
+				"uid", contrib.RuleS2S.UID)
+		}
+	}
+
+	logger.Info("Owner references update summary",
+		"existing", len(original.OwnerReferences),
+		"added", addedCount,
+		"total", len(latestRule.OwnerReferences))
+
+	patch := client.MergeFrom(original)
+	if err := PatchWithRetry(ctx, r.Client, latestRule, patch, DefaultMaxRetries); err != nil {
+		logger.Error(err, "Failed to patch rule")
+		return "", err
+	}
+
+	logger.Info("Successfully updated aggregated rule",
+		"namespace", latestRule.Namespace,
+		"name", latestRule.Name)
+
+	return latestRule.Name, nil
+}
+
 // generateRuleName creates a deterministic rule name based on input parameters
 func (r *RuleS2SReconciler) generateRuleName(
 	trafficDirection string,
@@ -851,8 +1384,6 @@ func (r *RuleS2SReconciler) generateRuleName(
 		localAGName,
 		targetAGName,
 		strings.ToLower(protocol))
-
-	// Нет доступа к логгеру здесь, но мы логируем входные параметры и результат в вызывающей функции
 
 	h := sha256.New()
 	h.Write([]byte(input))
@@ -914,72 +1445,222 @@ func (e *FailedToDeleteRulesError) Error() string {
 	return fmt.Sprintf("failed to delete the following IEAgAgRules: %s", strings.Join(e.FailedRules, ", "))
 }
 
-// deleteRelatedIEAgAgRules deletes all IEAgAgRules that have an OwnerReference to the given RuleS2S
-// Returns a FailedToDeleteRulesError if any rules could not be deleted
+// deleteRelatedIEAgAgRules deletes or updates IEAgAgRules when RuleS2S is deleted
 func (r *RuleS2SReconciler) deleteRelatedIEAgAgRules(ctx context.Context, ruleS2S *netguardv1alpha1.RuleS2S) error {
 	logger := log.FromContext(ctx)
 
-	// Get all IEAgAgRules across all namespaces
+	logger.Info("Processing deletion of related IEAgAgRules with aggregation support",
+		"ruleS2S", ruleS2S.Name,
+		"uid", ruleS2S.UID)
+
 	ieAgAgRuleList := &providerv1alpha1.IEAgAgRuleList{}
 	if err := r.List(ctx, ieAgAgRuleList); err != nil {
 		return err
 	}
 
-	logger.Info("Deleting IEAgAgRules")
-	logger.Info("Deleting rule", "ruleName", ruleS2S.GetName(), "uuid", ruleS2S.GetUID())
-	logger.Info("ieAgAgRuleList", "listNumber", len(ieAgAgRuleList.Items))
-
 	var failedRules []string
+	processedRules := 0
+	updatedRules := 0
+	deletedRules := 0
 
-	// Check each rule for an OwnerReference to this RuleS2S
 	for _, rule := range ieAgAgRuleList.Items {
+		hasOwnerRef := false
+
 		for _, ownerRef := range rule.GetOwnerReferences() {
-			logger.Info("Checking rule", "Kind", ownerRef.Kind, "uuid", ownerRef.UID)
 			if ownerRef.UID == ruleS2S.GetUID() &&
 				ownerRef.Kind == "RuleS2S" &&
 				ownerRef.APIVersion == netguardv1alpha1.GroupVersion.String() {
+				hasOwnerRef = true
+				break
+			}
+		}
 
-				// Found a rule that references this RuleS2S
-				logger.Info("Deleting related IEAgAgRule", "name", rule.Name, "namespace", rule.Namespace)
+		if !hasOwnerRef {
+			continue
+		}
 
-				// First, remove the finalizer if it exists
-				ruleCopy := rule.DeepCopy()
-				if controllerutil.ContainsFinalizer(ruleCopy, "provider.sgroups.io/finalizer") {
-					logger.Info("Removing finalizer from IEAgAgRule", "name", ruleCopy.Name, "namespace", ruleCopy.Namespace)
-					controllerutil.RemoveFinalizer(ruleCopy, "provider.sgroups.io/finalizer")
+		processedRules++
 
-					// Update the rule to remove the finalizer with retry
-					if err := UpdateWithRetry(ctx, r.Client, ruleCopy, DefaultMaxRetries); err != nil {
-						if !errors.IsNotFound(err) {
-							logger.Error(err, "Failed to remove finalizer from IEAgAgRule",
-								"name", ruleCopy.Name, "namespace", ruleCopy.Namespace)
-							// Continue with deletion attempt even if finalizer removal fails
-						}
-					}
-				}
+		if len(rule.GetOwnerReferences()) > 1 {
+			logger.Info("Updating IEAgAgRule - removing owner reference and recalculating ports",
+				"rule", rule.Name,
+				"namespace", rule.Namespace,
+				"remainingOwners", len(rule.GetOwnerReferences())-1)
 
-				// Then delete the rule
-				if err := r.Delete(ctx, ruleCopy); err != nil {
+			if err := r.updateRuleRemoveOwnerAndRecalculatePorts(ctx, &rule, ruleS2S); err != nil {
+				logger.Error(err, "Failed to update rule after owner removal",
+					"rule", rule.Name,
+					"namespace", rule.Namespace)
+				failedRules = append(failedRules, fmt.Sprintf("%s/%s", rule.Namespace, rule.Name))
+			} else {
+				updatedRules++
+			}
+		} else {
+			logger.Info("Deleting IEAgAgRule - last owner",
+				"rule", rule.Name,
+				"namespace", rule.Namespace)
+
+			ruleCopy := rule.DeepCopy()
+			if controllerutil.ContainsFinalizer(ruleCopy, "provider.sgroups.io/finalizer") {
+				controllerutil.RemoveFinalizer(ruleCopy, "provider.sgroups.io/finalizer")
+				if err := UpdateWithRetry(ctx, r.Client, ruleCopy, DefaultMaxRetries); err != nil {
 					if !errors.IsNotFound(err) {
-						logger.Error(err, "Failed to delete related IEAgAgRule",
-							"name", ruleCopy.Name, "namespace", ruleCopy.Namespace)
-						// Add to failed rules list instead of returning immediately
-						failedRules = append(failedRules, fmt.Sprintf("%s/%s", ruleCopy.Namespace, ruleCopy.Name))
+						logger.Error(err, "Failed to remove finalizer")
 					}
 				}
+			}
+
+			if err := r.Delete(ctx, ruleCopy); err != nil {
+				if !errors.IsNotFound(err) {
+					logger.Error(err, "Failed to delete rule")
+					failedRules = append(failedRules, fmt.Sprintf("%s/%s", ruleCopy.Namespace, ruleCopy.Name))
+				} else {
+					deletedRules++
+				}
+			} else {
+				deletedRules++
 			}
 		}
 	}
 
-	// If any rules failed to delete, return a custom error
+	logger.Info("Deletion processing summary",
+		"processedRules", processedRules,
+		"updatedRules", updatedRules,
+		"deletedRules", deletedRules,
+		"failedRules", len(failedRules))
+
 	if len(failedRules) > 0 {
-		logger.Error(fmt.Errorf("failed to delete some IEAgAgRules"),
-			"Some IEAgAgRules could not be deleted",
-			"failedRules", strings.Join(failedRules, ", "))
 		return &FailedToDeleteRulesError{FailedRules: failedRules}
 	}
 
 	return nil
+}
+
+// updateRuleRemoveOwnerAndRecalculatePorts updates a rule after removing one of its owners
+func (r *RuleS2SReconciler) updateRuleRemoveOwnerAndRecalculatePorts(
+	ctx context.Context,
+	rule *providerv1alpha1.IEAgAgRule,
+	deletedRuleS2S *netguardv1alpha1.RuleS2S,
+) error {
+	logger := log.FromContext(ctx)
+
+	latestRule := &providerv1alpha1.IEAgAgRule{}
+	if err := r.Get(ctx, types.NamespacedName{
+		Namespace: rule.Namespace,
+		Name:      rule.Name,
+	}, latestRule); err != nil {
+		return err
+	}
+
+	original := latestRule.DeepCopy()
+
+	newOwnerRefs := []metav1.OwnerReference{}
+	remainingRuleS2SUIDs := []types.UID{}
+
+	for _, ref := range latestRule.OwnerReferences {
+		if ref.UID != deletedRuleS2S.UID {
+			newOwnerRefs = append(newOwnerRefs, ref)
+			if ref.Kind == "RuleS2S" {
+				remainingRuleS2SUIDs = append(remainingRuleS2SUIDs, ref.UID)
+			}
+		}
+	}
+
+	latestRule.OwnerReferences = newOwnerRefs
+
+	logger.Info("Recalculating ports from remaining owners",
+		"remainingOwners", len(remainingRuleS2SUIDs))
+
+	aggregatedPorts, err := r.recalculatePortsFromRemainingOwners(ctx, remainingRuleS2SUIDs, rule)
+	if err != nil {
+		logger.Error(err, "Failed to recalculate ports")
+	} else {
+		latestRule.Spec.Ports = []providerv1alpha1.AccPorts{
+			{
+				D: strings.Join(aggregatedPorts, ","),
+			},
+		}
+
+		logger.Info("Updated ports after recalculation",
+			"oldPorts", original.Spec.Ports,
+			"newPorts", strings.Join(aggregatedPorts, ","))
+	}
+
+	patch := client.MergeFrom(original)
+	return PatchWithRetry(ctx, r.Client, latestRule, patch, DefaultMaxRetries)
+}
+
+// recalculatePortsFromRemainingOwners recalculates ports from remaining RuleS2S owners
+func (r *RuleS2SReconciler) recalculatePortsFromRemainingOwners(
+	ctx context.Context,
+	remainingRuleS2SUIDs []types.UID,
+	rule *providerv1alpha1.IEAgAgRule,
+) ([]string, error) {
+	logger := log.FromContext(ctx)
+
+	if len(remainingRuleS2SUIDs) == 0 {
+		return []string{}, nil
+	}
+
+	allRules := &netguardv1alpha1.RuleS2SList{}
+	if err := r.List(ctx, allRules); err != nil {
+		return nil, err
+	}
+
+	uidToRuleS2S := make(map[types.UID]*netguardv1alpha1.RuleS2S)
+	for i := range allRules.Items {
+		uidToRuleS2S[allRules.Items[i].UID] = &allRules.Items[i]
+	}
+
+	var contributingRules []ContributingRule
+
+	for _, uid := range remainingRuleS2SUIDs {
+		ruleS2S, exists := uidToRuleS2S[uid]
+		if !exists {
+			logger.Info("RuleS2S not found by UID, skipping", "uid", uid)
+			continue
+		}
+
+		localService, targetService, err := r.getServicesForRule(ctx, ruleS2S)
+		if err != nil {
+			logger.Error(err, "Failed to get services for RuleS2S", "name", ruleS2S.Name)
+			continue
+		}
+
+		var ports []string
+		if strings.ToLower(ruleS2S.Spec.Traffic) == "ingress" {
+			ports = r.extractPortsFromService(localService)
+		} else {
+			ports = r.extractPortsFromService(targetService)
+		}
+
+		if len(ports) > 0 {
+			contributingRules = append(contributingRules, ContributingRule{
+				RuleS2S: ruleS2S,
+				Ports:   ports,
+			})
+		}
+	}
+
+	portSet := make(map[string]bool)
+	for _, contrib := range contributingRules {
+		for _, port := range contrib.Ports {
+			portSet[port] = true
+		}
+	}
+
+	var aggregatedPorts []string
+	for port := range portSet {
+		aggregatedPorts = append(aggregatedPorts, port)
+	}
+
+	sort.Strings(aggregatedPorts)
+
+	logger.Info("Recalculated aggregated ports",
+		"contributingRules", len(contributingRules),
+		"aggregatedPorts", strings.Join(aggregatedPorts, ","))
+
+	return aggregatedPorts, nil
 }
 
 // findRuleS2SForService finds all RuleS2S resources that reference a Service through ServiceAlias
@@ -1122,12 +1803,10 @@ func (r *RuleS2SReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return err
 	}
 
-	// Добавляем составной индекс для быстрого поиска дубликатов
 	if err := mgr.GetFieldIndexer().IndexField(context.Background(),
 		&netguardv1alpha1.RuleS2S{}, "spec.composite",
 		func(obj client.Object) []string {
 			rule := obj.(*netguardv1alpha1.RuleS2S)
-			// Создаем уникальный ключ на основе полей спецификации
 			composite := fmt.Sprintf("%s-%s-%s-%s",
 				rule.Spec.Traffic,
 				rule.Spec.ServiceLocalRef.Name,
