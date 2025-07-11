@@ -37,6 +37,9 @@ type RuleS2SSpec struct {
 	// ServiceRef is a reference to the target service
 	// +kubebuilder:validation:Required
 	ServiceRef NamespacedObjectReference `json:"serviceRef"`
+
+	// +optional
+	Description string `json:"description,omitempty"`
 }
 
 // RuleS2SStatus defines the observed state of RuleS2S.

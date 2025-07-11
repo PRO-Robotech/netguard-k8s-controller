@@ -1761,7 +1761,7 @@ func (r *RuleS2SReconciler) couldBeLegacyRuleForRuleS2S(
 		return false
 	}
 
-	// Check if rule has empty ports (the main indicator of the problem we're fixing)
+	// Check if rule has empty ports
 	if len(rule.Spec.Ports) > 0 && rule.Spec.Ports[0].D == "" {
 		// This is likely an orphaned rule with empty ports that should be deleted
 		return true
