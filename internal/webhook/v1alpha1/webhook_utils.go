@@ -113,6 +113,8 @@ func IsReadyConditionTrue(obj runtime.Object) bool {
 		return isConditionTrue(o.Status.Conditions, netguardv1alpha1.ConditionReady)
 	case *providerv1alpha1.AddressGroup:
 		return isConditionTrue(o.Status.Conditions, providerv1alpha1.ConditionReady)
+	case *netguardv1alpha1.RuleS2S:
+		return isConditionTrue(o.Status.Conditions, netguardv1alpha1.ConditionReady)
 	default:
 		// If we don't know how to check the condition, assume it's not ready
 		return false
