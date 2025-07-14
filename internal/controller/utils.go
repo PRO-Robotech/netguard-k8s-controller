@@ -285,3 +285,63 @@ func SafeDeleteAndWait(ctx context.Context, c client.Client, obj client.Object, 
 		}
 	}
 }
+
+// DeleteWithRetry deletes a resource with retries on specific errors
+func DeleteWithRetry(ctx context.Context, c client.Client, obj client.Object, maxRetries int) error {
+	logger := log.FromContext(ctx)
+	name := obj.GetName()
+	namespace := obj.GetNamespace()
+
+	logger.Info("Starting DeleteWithRetry",
+		"resource", fmt.Sprintf("%s/%s", namespace, name),
+		"resourceType", fmt.Sprintf("%T", obj),
+		"maxRetries", maxRetries)
+
+	for i := 0; i < maxRetries; i++ {
+		err := c.Delete(ctx, obj)
+		if err == nil {
+			logger.Info("Delete successful",
+				"resource", fmt.Sprintf("%s/%s", namespace, name),
+				"attempt", i+1)
+			return nil
+		}
+
+		if apierrors.IsNotFound(err) {
+			// Resource already deleted
+			logger.Info("Resource already deleted",
+				"resource", fmt.Sprintf("%s/%s", namespace, name),
+				"attempt", i+1)
+			return nil
+		}
+
+		// Check if this is a validation error that might be temporary
+		// (e.g., webhook blocking deletion due to active bindings)
+		if apierrors.IsInvalid(err) || apierrors.IsForbidden(err) {
+			logger.Info("Validation/Forbidden error detected, retrying",
+				"resource", fmt.Sprintf("%s/%s", namespace, name),
+				"attempt", i+1,
+				"maxRetries", maxRetries,
+				"error", err.Error())
+
+			// Wait before retrying with exponential backoff
+			backoff := DefaultRetryInterval * time.Duration(1<<uint(i))
+			logger.Info("Waiting before retry",
+				"resource", fmt.Sprintf("%s/%s", namespace, name),
+				"backoffMs", backoff.Milliseconds())
+			time.Sleep(backoff)
+			continue
+		}
+
+		// For other errors, return immediately
+		logger.Error(err, "Non-retryable error when deleting",
+			"resource", fmt.Sprintf("%s/%s", namespace, name),
+			"errorType", fmt.Sprintf("%T", err))
+		return err
+	}
+
+	logger.Error(fmt.Errorf("max retries exceeded"), "Failed to delete resource after max retries",
+		"resource", fmt.Sprintf("%s/%s", namespace, name),
+		"maxRetries", maxRetries)
+
+	return fmt.Errorf("failed to delete resource after %d retries", maxRetries)
+}

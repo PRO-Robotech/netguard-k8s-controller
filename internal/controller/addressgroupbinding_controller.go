@@ -86,23 +86,6 @@ func (r *AddressGroupBindingReconciler) Reconcile(ctx context.Context, req ctrl.
 		"generation", binding.Generation,
 		"resourceVersion", binding.ResourceVersion)
 
-	// TEMPORARY-DEBUG-CODE: Detailed logging for problematic resources
-	if binding.Name == "dynamic-2rx8z" || binding.Name == "dynamic-7dls7" ||
-		binding.Name == "dynamic-fb5qw" || binding.Name == "dynamic-g6jfj" ||
-		binding.Name == "dynamic-jd2b7" || binding.Name == "dynamic-lsjlt" {
-
-		logger.Info("TEMPORARY-DEBUG-CODE: Detailed state of problematic binding",
-			"name", binding.Name,
-			"namespace", binding.Namespace,
-			"generation", binding.Generation,
-			"resourceVersion", binding.ResourceVersion,
-			"finalizers", binding.Finalizers,
-			"ownerReferences", formatOwnerReferences(binding.OwnerReferences),
-			"serviceRef", formatObjectReference(binding.Spec.ServiceRef),
-			"addressGroupRef", formatNamespacedObjectReference(binding.Spec.AddressGroupRef),
-			"conditions", formatConditions(binding.Status.Conditions))
-	}
-
 	// Add finalizer if it doesn't exist
 	const finalizer = "addressgroupbinding.netguard.sgroups.io/finalizer"
 	if !controllerutil.ContainsFinalizer(binding, finalizer) {
@@ -287,33 +270,40 @@ func (r *AddressGroupBindingReconciler) reconcileNormal(ctx context.Context, bin
 		ownerRefsUpdated = true
 	}
 
-	// Add OwnerReference to AddressGroup
-	agOwnerRef := metav1.OwnerReference{
-		APIVersion:         addressGroup.APIVersion,
-		Kind:               addressGroup.Kind,
-		Name:               addressGroup.Name,
-		UID:                addressGroup.UID,
-		BlockOwnerDeletion: pointer.Bool(false),
-		Controller:         pointer.Bool(false),
-	}
-	if !containsOwnerReference(binding.GetOwnerReferences(), agOwnerRef) {
-		logger.Info("Adding AddressGroup owner reference",
-			"addressGroup", fmt.Sprintf("%s/%s", addressGroup.Kind, addressGroup.Name),
-			"addressGroupUID", addressGroup.UID)
-
-		// Remove existing owner references for the same AddressGroup (by Kind+Name+APIVersion)
-		var updatedOwnerRefs []metav1.OwnerReference
-		for _, ref := range binding.GetOwnerReferences() {
-			if !(ref.Kind == agOwnerRef.Kind &&
-				ref.Name == agOwnerRef.Name &&
-				ref.APIVersion == agOwnerRef.APIVersion) {
-				updatedOwnerRefs = append(updatedOwnerRefs, ref)
-			}
+	// Add OwnerReference to AddressGroup only if same namespace
+	if addressGroupNamespace == binding.GetNamespace() {
+		agOwnerRef := metav1.OwnerReference{
+			APIVersion:         addressGroup.APIVersion,
+			Kind:               addressGroup.Kind,
+			Name:               addressGroup.Name,
+			UID:                addressGroup.UID,
+			BlockOwnerDeletion: pointer.Bool(false),
+			Controller:         pointer.Bool(false),
 		}
-		// Add the new owner reference
-		updatedOwnerRefs = append(updatedOwnerRefs, agOwnerRef)
-		binding.OwnerReferences = updatedOwnerRefs
-		ownerRefsUpdated = true
+		if !containsOwnerReference(binding.GetOwnerReferences(), agOwnerRef) {
+			logger.Info("Adding AddressGroup owner reference (same namespace)",
+				"addressGroup", fmt.Sprintf("%s/%s", addressGroup.Kind, addressGroup.Name),
+				"addressGroupUID", addressGroup.UID)
+
+			// Remove existing owner references for the same AddressGroup (by Kind+Name+APIVersion)
+			var updatedOwnerRefs []metav1.OwnerReference
+			for _, ref := range binding.GetOwnerReferences() {
+				if !(ref.Kind == agOwnerRef.Kind &&
+					ref.Name == agOwnerRef.Name &&
+					ref.APIVersion == agOwnerRef.APIVersion) {
+					updatedOwnerRefs = append(updatedOwnerRefs, ref)
+				}
+			}
+			// Add the new owner reference
+			updatedOwnerRefs = append(updatedOwnerRefs, agOwnerRef)
+			binding.OwnerReferences = updatedOwnerRefs
+			ownerRefsUpdated = true
+		}
+	} else {
+		logger.Info("Skipping AddressGroup owner reference (cross-namespace not supported)",
+			"addressGroup", fmt.Sprintf("%s/%s", addressGroup.Kind, addressGroup.Name),
+			"addressGroupNamespace", addressGroupNamespace,
+			"bindingNamespace", binding.GetNamespace())
 	}
 
 	// If owner references were updated, update the binding

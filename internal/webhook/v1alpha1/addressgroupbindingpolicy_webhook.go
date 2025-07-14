@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -84,8 +85,8 @@ func (v *AddressGroupBindingPolicyCustomValidator) ValidateCreate(ctx context.Co
 	}
 
 	// Check that AddressGroupRef apiVersion is correct
-	if addressGroupRef.GetAPIVersion() != "netguard.sgroups.io/v1alpha1" {
-		return nil, fmt.Errorf("addressGroupRef must be to a resource with APIVersion netguard.sgroups.io/v1alpha1, got %s", addressGroupRef.GetAPIVersion())
+	if addressGroupRef.GetAPIVersion() != "provider.sgroups.io/v1alpha1" {
+		return nil, fmt.Errorf("addressGroupRef must be to a resource with APIVersion provider.sgroups.io/v1alpha1, got %s", addressGroupRef.GetAPIVersion())
 	}
 
 	addressGroupNamespace := ResolveNamespace(addressGroupRef.GetNamespace(), policy.GetNamespace())
@@ -107,14 +108,6 @@ func (v *AddressGroupBindingPolicyCustomValidator) ValidateCreate(ctx context.Co
 			addressGroupNamespace,
 			err)
 	}
-
-	// For backward compatibility, also check if AddressGroupPortMapping exists
-	addressGroupPortMapping := &netguardv1alpha1.AddressGroupPortMapping{}
-	addressGroupPortMappingKey := client.ObjectKey{
-		Name:      addressGroupRef.GetName(),
-		Namespace: addressGroupNamespace,
-	}
-	_ = v.Client.Get(ctx, addressGroupPortMappingKey, addressGroupPortMapping)
 
 	// 1.2 Check that onRef (ServiceRef) exists
 	serviceRef := policy.Spec.ServiceRef
@@ -139,17 +132,6 @@ func (v *AddressGroupBindingPolicyCustomValidator) ValidateCreate(ctx context.Co
 			serviceRef.GetName(),
 			ResolveNamespace(serviceRef.GetNamespace(), policy.GetNamespace()),
 			err)
-	}
-
-	// 1.2 Check that onRef (AddressGroupRef) exists
-	if addressGroupRef.GetName() == "" {
-		return nil, fmt.Errorf("addressGroupRef.name cannot be empty")
-	}
-	if addressGroupRef.GetKind() != "AddressGroup" {
-		return nil, fmt.Errorf("addressGroupRef must be to an AddressGroup resource, got %s", addressGroupRef.GetKind())
-	}
-	if addressGroupRef.GetAPIVersion() != "netguard.sgroups.io/v1alpha1" {
-		return nil, fmt.Errorf("addressGroupRef must be to a resource with APIVersion netguard.sgroups.io/v1alpha1, got %s", addressGroupRef.GetAPIVersion())
 	}
 
 	// 1.3 Check that there's no duplicate AddressGroupBindingPolicy
@@ -260,7 +242,59 @@ func (v *AddressGroupBindingPolicyCustomValidator) ValidateDelete(ctx context.Co
 	// Get the service namespace from the policy
 	serviceNamespace := ResolveNamespace(policy.Spec.ServiceRef.GetNamespace(), addressGroupNamespace)
 
-	// 1.1 Check that there are no active addressGroupBindings related to this policy
+	// Check if Service exists
+	service := &netguardv1alpha1.Service{}
+	serviceKey := client.ObjectKey{
+		Name:      policy.Spec.ServiceRef.GetName(),
+		Namespace: serviceNamespace,
+	}
+
+	serviceExists := true
+	if err := v.Client.Get(ctx, serviceKey, service); err != nil {
+		if apierrors.IsNotFound(err) {
+			addressgroupbindingpolicylog.Info("Service not found, allowing policy deletion",
+				"service", serviceKey.String(),
+				"policy", policy.GetName())
+			serviceExists = false
+		} else {
+			return nil, fmt.Errorf("failed to get Service %s: %w", serviceKey.String(), err)
+		}
+	}
+
+	// Check if AddressGroup exists
+	addressGroup := &providerv1alpha1.AddressGroup{}
+	addressGroupKey := client.ObjectKey{
+		Name:      policy.Spec.AddressGroupRef.GetName(),
+		Namespace: addressGroupNamespace,
+	}
+
+	addressGroupExists := true
+	if err := v.Client.Get(ctx, addressGroupKey, addressGroup); err != nil {
+		if apierrors.IsNotFound(err) {
+			addressgroupbindingpolicylog.Info("AddressGroup not found, allowing policy deletion",
+				"addressGroup", addressGroupKey.String(),
+				"policy", policy.GetName())
+			addressGroupExists = false
+		} else {
+			return nil, fmt.Errorf("failed to get AddressGroup %s: %w", addressGroupKey.String(), err)
+		}
+	}
+
+	// If either Service or AddressGroup doesn't exist, allow deletion
+	if !serviceExists || !addressGroupExists {
+		addressgroupbindingpolicylog.Info("Allowing policy deletion due to missing dependencies",
+			"policy", policy.GetName(),
+			"serviceExists", serviceExists,
+			"addressGroupExists", addressGroupExists)
+		return nil, nil
+	}
+
+	// Both dependencies exist, check for active bindings
+	addressgroupbindingpolicylog.Info("Both dependencies exist, checking for active bindings",
+		"policy", policy.GetName(),
+		"serviceNamespace", serviceNamespace)
+
+	// Check that there are no active addressGroupBindings related to this policy
 	// Only list bindings in the service namespace since AddressGroupBinding is always created in the same namespace as the Service
 	bindingList := &netguardv1alpha1.AddressGroupBindingList{}
 	if err := v.Client.List(ctx, bindingList, client.InNamespace(serviceNamespace)); err != nil {
@@ -278,10 +312,17 @@ func (v *AddressGroupBindingPolicyCustomValidator) ValidateDelete(ctx context.Co
 			binding.Spec.AddressGroupRef.GetName() == policy.Spec.AddressGroupRef.GetName() &&
 			ResolveNamespace(binding.Spec.AddressGroupRef.GetNamespace(), binding.GetNamespace()) == addressGroupNamespace {
 
+			addressgroupbindingpolicylog.Info("Found active binding, blocking policy deletion",
+				"policy", policy.GetName(),
+				"binding", binding.GetName(),
+				"bindingNamespace", binding.GetNamespace())
+
 			return nil, fmt.Errorf("cannot delete policy while active AddressGroupBinding %s exists in namespace %s",
 				binding.GetName(), binding.GetNamespace())
 		}
 	}
 
+	addressgroupbindingpolicylog.Info("No active bindings found, allowing policy deletion",
+		"policy", policy.GetName())
 	return nil, nil
 }
